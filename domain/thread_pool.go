@@ -26,7 +26,4 @@ type ThreadPool interface {
 	QueuedTaskCount() int  // In queue
 	ActiveTaskCount() int  // Executing
 	DelayedTaskCount() int // Delayed
-
-	OnTaskStart()
-	OnTaskEnd()
 }

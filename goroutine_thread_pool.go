@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"swind/go-task-runner/domain"
 	"sync"
+	"time"
 )
 
 // GoroutineThreadPool 管理一組 worker goroutines
@@ -11,7 +13,7 @@ import (
 type GoroutineThreadPool struct {
 	id        string
 	workers   int
-	scheduler *TaskScheduler
+	scheduler *domain.TaskScheduler
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -20,17 +22,20 @@ type GoroutineThreadPool struct {
 }
 
 // NewThreadGroup 創建一個新的 ThreadGroup
-func NewThreadGroup(id string, workers int) *GoroutineThreadPool {
+func NewGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
 	return &GoroutineThreadPool{
 		id:        id,
 		workers:   workers,
-		scheduler: NewPriorityTaskScheduler(workers),
+		scheduler: domain.NewFIFOTaskScheduler(workers),
 	}
 }
 
-// NewThreadGroupDefault 創建一個使用預設 ID 的 ThreadGroup
-func NewThreadGroupDefault(workers int) *GoroutineThreadPool {
-	return NewThreadGroup(fmt.Sprintf("pool-%d", workers), workers)
+func NewPriorityGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
+	return &GoroutineThreadPool{
+		id:        id,
+		workers:   workers,
+		scheduler: domain.NewPriorityTaskScheduler(workers),
+	}
 }
 
 // Start 啟動所有 worker goroutines
@@ -122,4 +127,24 @@ func (tg *GoroutineThreadPool) Join() {
 // WorkerCount 返回 worker 數量
 func (tg *GoroutineThreadPool) WorkerCount() int {
 	return tg.workers
+}
+
+func (tg *GoroutineThreadPool) QueuedTaskCount() int {
+	return tg.scheduler.QueuedTaskCount()
+}
+
+func (tg *GoroutineThreadPool) ActiveTaskCount() int {
+	return tg.scheduler.ActiveTaskCount()
+}
+
+func (tg *GoroutineThreadPool) DelayedTaskCount() int {
+	return tg.scheduler.DelayedTaskCount()
+}
+
+func (tg *GoroutineThreadPool) PostInternal(task domain.Task, traits domain.TaskTraits) {
+	tg.scheduler.PostInternal(task, traits)
+}
+
+func (tg *GoroutineThreadPool) PostDelayedInternal(task domain.Task, delay time.Duration, traits domain.TaskTraits, target domain.TaskRunner) {
+	tg.scheduler.PostDelayedInternal(task, delay, traits, target)
 }
