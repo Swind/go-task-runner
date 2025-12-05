@@ -2,17 +2,18 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-const MaxTasksPerSlice = 4 // Process up to 4 tasks per slice (Fairness)
-
 type SequencedTaskRunner struct {
-	threadPool ThreadPool
-	queue      TaskQueue
-	mu         sync.Mutex
-	isRunning  bool
+	threadPool    ThreadPool
+	queue         TaskQueue
+	mu            sync.Mutex
+	isRunning     bool
+	activeRunners int32 // atomic guard for concurrency assertion
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -31,71 +32,68 @@ func (r *SequencedTaskRunner) PostDelayedTask(task Task, delay time.Duration) {
 }
 
 func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
+	// Assertion: Ensure strictly one goroutine at a time
+	if n := atomic.AddInt32(&r.activeRunners, 1); n > 1 {
+		panic(fmt.Sprintf("SequencedTaskRunner: concurrent runLoop detected (count=%d)", n))
+	}
+	defer atomic.AddInt32(&r.activeRunners, -1)
+
 	runCtx := context.WithValue(ctx, taskRunnerKey, r)
 
-	// 1. Try to fetch tasks
-	items := r.queue.PopUpTo(MaxTasksPerSlice)
+	// 1. Fetch SINGLE task
+	item, ok := r.queue.Pop() // Changed from PopUpTo
 
-	if len(items) == 0 {
-		// Handle spin and Race Condition
-		var needRepost bool
-		var nextTraits TaskTraits
-
+	if !ok {
+		// Queue completely empty
 		r.mu.Lock()
 		if r.queue.IsEmpty() {
-			// Indeed empty, allow to set isRunning = false
+			r.isRunning = false
+			r.mu.Unlock()
+			return
+		}
+		r.mu.Unlock()
+
+		var needRepost bool
+		r.mu.Lock()
+		if r.queue.IsEmpty() {
 			r.isRunning = false
 			needRepost = false
 		} else {
-			// Queue not empty (Race: new task just arrived), need repost
 			needRepost = true
 		}
 		r.mu.Unlock()
 
-		if !needRepost {
-			return
+		if needRepost {
+			nextTraits, _ := r.queue.PeekTraits() // Best effort peek
+			r.rePostSelf(nextTraits)
 		}
-
-		// Read traits outside lock (TaskQueue has its own lock)
-		// Lock Order: r.mu -> q.mu (Safe)
-		nextTraits, ok := r.queue.PeekTraits()
-		if !ok {
-			nextTraits = DefaultTaskTraits()
-		}
-		r.rePostSelf(nextTraits)
 		return
 	}
 
-	// 2. Execute tasks
-	for _, item := range items {
-		func() {
-			defer func() { recover() }()
-			item.Task(runCtx)
-		}()
-	}
+	// 2. Execute ONE task
+	func() {
+		defer func() { recover() }()
+		item.Task(runCtx)
+	}()
 
-	// 3. Check if need to continue (Fairness Yield)
-	var needRepost bool
+	// 3. Always repost if there are more tasks (Yield)
+	// This ensures we yield to the Scheduler between every task
 	var nextTraits TaskTraits
+	var more bool
 
 	r.mu.Lock()
 	if r.queue.IsEmpty() {
 		r.isRunning = false
-		needRepost = false
+		more = false
 	} else {
-		needRepost = true
+		more = true
 	}
 	r.mu.Unlock()
 
-	if !needRepost {
-		return
+	if more {
+		nextTraits, _ = r.queue.PeekTraits()
+		r.rePostSelf(nextTraits)
 	}
-
-	nextTraits, ok := r.queue.PeekTraits()
-	if !ok {
-		nextTraits = DefaultTaskTraits()
-	}
-	r.rePostSelf(nextTraits)
 }
 
 // scheduleRunLoop starts runLoop (if not already running)
