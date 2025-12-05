@@ -1,4 +1,4 @@
-package main
+package taskrunner
 
 import (
 	"context"
@@ -147,4 +147,60 @@ func (tg *GoroutineThreadPool) PostInternal(task domain.Task, traits domain.Task
 
 func (tg *GoroutineThreadPool) PostDelayedInternal(task domain.Task, delay time.Duration, traits domain.TaskTraits, target domain.TaskRunner) {
 	tg.scheduler.PostDelayedInternal(task, delay, traits, target)
+}
+
+// =============================================================================
+// Global Thread Pool Helper (Singleton)
+// =============================================================================
+
+var (
+	globalThreadPool *GoroutineThreadPool
+	globalMu         sync.Mutex
+)
+
+// InitGlobalThreadPool initializes the global thread pool with specified number of workers.
+// It starts the pool immediately.
+func InitGlobalThreadPool(workers int) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalThreadPool != nil {
+		return // Already initialized
+	}
+
+	globalThreadPool = NewGoroutineThreadPool("global-pool", workers)
+	globalThreadPool.Start(context.Background())
+}
+
+// GetGlobalThreadPool returns the global thread pool instance.
+// It panics if InitGlobalThreadPool has not been called.
+func GetGlobalThreadPool() *GoroutineThreadPool {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalThreadPool == nil {
+		panic("GlobalThreadPool not initialized. Call InitGlobalThreadPool() first.")
+	}
+	return globalThreadPool
+}
+
+// ShutdownGlobalThreadPool stops the global thread pool.
+func ShutdownGlobalThreadPool() {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalThreadPool != nil {
+		globalThreadPool.Stop()
+		globalThreadPool = nil
+	}
+}
+
+// CreateTaskRunner creates a new SequencedTaskRunner using the global thread pool.
+// This is the recommended way to get a new TaskRunner.
+func CreateTaskRunner(traits domain.TaskTraits) *domain.SequencedTaskRunner {
+	pool := GetGlobalThreadPool()
+	// Note: Currently SequencedTaskRunner ignores traits for the runner itself (it attaches traits to tasks).
+	// But in the future we might want to configure the runner with default traits.
+	// For now, we return a standard SequencedTaskRunner backed by the global pool.
+	return domain.NewSequencedTaskRunner(pool)
 }
