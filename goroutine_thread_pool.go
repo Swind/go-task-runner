@@ -11,7 +11,7 @@ import (
 type GoroutineThreadPool struct {
 	id        string
 	workers   int
-	scheduler *PriorityTaskScheduler
+	scheduler *TaskScheduler
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
