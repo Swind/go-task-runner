@@ -1,6 +1,6 @@
 # Task Scheduler Design (Go)
 
-This document details the implementation of a production-grade task scheduling system in Golang, referenced from Chromium's `base::TaskScheduler` architecture.
+This document details the implementation of a prototype task scheduling system in Golang, referenced from Chromium's `base::TaskScheduler` architecture.
 
 **v2.1 Updates:**
 
