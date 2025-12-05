@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// GoroutineThreadPool 管理一組 worker goroutines
-// 負責從 WorkSource 拉取任務並執行
+// GoroutineThreadPool manages a set of worker goroutines
+// Responsible for pulling tasks from WorkSource and executing them
 type GoroutineThreadPool struct {
 	id        string
 	workers   int
@@ -21,7 +21,7 @@ type GoroutineThreadPool struct {
 	runningMu sync.RWMutex
 }
 
-// NewThreadGroup 創建一個新的 ThreadGroup
+// NewGoroutineThreadPool creates a new GoroutineThreadPool
 func NewGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
 	return &GoroutineThreadPool{
 		id:        id,
@@ -38,13 +38,13 @@ func NewPriorityGoroutineThreadPool(id string, workers int) *GoroutineThreadPool
 	}
 }
 
-// Start 啟動所有 worker goroutines
+// Start starts all worker goroutines
 func (tg *GoroutineThreadPool) Start(ctx context.Context) {
 	tg.runningMu.Lock()
 	defer tg.runningMu.Unlock()
 
 	if tg.running {
-		return // 已經在運行
+		return // Already running
 	}
 
 	tg.ctx, tg.cancel = context.WithCancel(ctx)
@@ -56,7 +56,7 @@ func (tg *GoroutineThreadPool) Start(ctx context.Context) {
 	}
 }
 
-// Stop 停止線程池
+// Stop stops the thread pool
 func (tg *GoroutineThreadPool) Stop() {
 	tg.runningMu.Lock()
 	if !tg.running {
@@ -77,40 +77,40 @@ func (tg *GoroutineThreadPool) Stop() {
 	tg.runningMu.Unlock()
 }
 
-// ID 返回線程池的 ID
+// ID returns the ID of the thread pool
 func (tg *GoroutineThreadPool) ID() string {
 	return tg.id
 }
 
-// IsRunning 返回線程池是否正在運行
+// IsRunning returns whether the thread pool is running
 func (tg *GoroutineThreadPool) IsRunning() bool {
 	tg.runningMu.RLock()
 	defer tg.runningMu.RUnlock()
 	return tg.running
 }
 
-// workerLoop 是每個 worker 的主循環
+// workerLoop is the main loop for each worker
 func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 	defer tg.wg.Done()
 	stopCh := ctx.Done()
 
 	for {
-		// 從 WorkSource 拉取任務
+		// Pull tasks from WorkSource
 		task, ok := tg.scheduler.GetWork(stopCh)
 		if !ok {
-			// WorkSource 已關閉或 context 已取消
+			// WorkSource closed or context canceled
 			return
 		}
 
-		// 透過介面更新 Active Metrics
+		// Update Active Metrics via interface
 		tg.scheduler.OnTaskStart()
 
-		// 執行任務，並捕獲 panic
+		// Execute task and capture panic
 		func() {
 			defer func() {
 				tg.scheduler.OnTaskEnd()
 				if r := recover(); r != nil {
-					// TODO: 可以增加更好的錯誤處理，例如回調
+					// TODO: Add better error handling, e.g. callback
 					fmt.Printf("[Worker %d] Panic: %v\n", id, r)
 				}
 			}()
@@ -119,12 +119,12 @@ func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 	}
 }
 
-// Join 等待所有 worker goroutines 結束
+// Join waits for all worker goroutines to finish
 func (tg *GoroutineThreadPool) Join() {
 	tg.wg.Wait()
 }
 
-// WorkerCount 返回 worker 數量
+// WorkerCount returns the number of workers
 func (tg *GoroutineThreadPool) WorkerCount() int {
 	return tg.workers
 }
