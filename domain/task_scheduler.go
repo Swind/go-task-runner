@@ -102,7 +102,7 @@ func (s *TaskScheduler) WorkerCount() int     { return s.workerCount }
 func (s *TaskScheduler) QueuedTaskCount() int { return int(atomic.LoadInt32(&s.metricQueued)) }
 func (s *TaskScheduler) ActiveTaskCount() int { return int(atomic.LoadInt32(&s.metricActive)) }
 func (s *TaskScheduler) DelayedTaskCount() int {
-	return int(atomic.LoadInt32(&s.metricDelayed))
+	return s.delayManager.TaskCount()
 }
 
 func (s *TaskScheduler) OnTaskStart() {

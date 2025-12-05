@@ -138,3 +138,9 @@ func (dm *DelayManager) loop() {
 func (dm *DelayManager) Stop() {
 	dm.cancel()
 }
+
+func (dm *DelayManager) TaskCount() int {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	return len(dm.pq)
+}
