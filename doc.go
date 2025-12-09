@@ -13,7 +13,7 @@
 //
 // Create a SequencedTaskRunner for sequential task execution:
 //
-//	runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
+//	runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 //	runner.PostTask(func(ctx context.Context) {
 //		// Your code here - guaranteed sequential execution
 //	})
@@ -40,14 +40,13 @@
 //	import (
 //		"context"
 //		taskrunner "github.com/Swind/go-task-runner"
-//		"github.com/Swind/go-task-runner/core"
 //	)
 //
 //	func main() {
 //		taskrunner.InitGlobalThreadPool(4)
 //		defer taskrunner.ShutdownGlobalThreadPool()
 //
-//		runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
+//		runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 //
 //		// Tasks execute sequentially
 //		runner.PostTask(func(ctx context.Context) {

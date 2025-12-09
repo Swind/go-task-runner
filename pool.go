@@ -198,7 +198,7 @@ func ShutdownGlobalThreadPool() {
 
 // CreateTaskRunner creates a new SequencedTaskRunner using the global thread pool.
 // This is the recommended way to get a new TaskRunner.
-func CreateTaskRunner(traits core.TaskTraits) *core.SequencedTaskRunner {
+func CreateTaskRunner(traits TaskTraits) *SequencedTaskRunner {
 	pool := GetGlobalThreadPool()
 	// Note: Currently SequencedTaskRunner ignores traits for the runner itself (it attaches traits to tasks).
 	// But in the future we might want to configure the runner with default traits.

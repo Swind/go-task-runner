@@ -44,7 +44,6 @@ import (
     "time"
 
     taskrunner "github.com/Swind/go-task-runner"
-    "github.com/Swind/go-task-runner/core"
 )
 
 func main() {
@@ -53,7 +52,7 @@ func main() {
     defer taskrunner.ShutdownGlobalThreadPool()
 
     // Create a sequenced runner (like a logical thread)
-    runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
+    runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 
     // ...
 }
@@ -81,8 +80,8 @@ The `SequencedTaskRunner` is the recommended way to execute tasks. It ensures th
 ```go
     runner.PostTaskWithTraits(func(ctx context.Context) {
         println("High priority work!")
-    }, core.TaskTraits{
-        Priority: core.TaskPriorityUserBlocking,
+    }, taskrunner.TaskTraits{
+        Priority: taskrunner.TaskPriorityUserBlocking,
     })
 ```
 

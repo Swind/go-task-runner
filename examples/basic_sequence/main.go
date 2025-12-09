@@ -6,7 +6,6 @@ import (
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
-	"github.com/Swind/go-task-runner/core"
 )
 
 func main() {
@@ -18,8 +17,8 @@ func main() {
 
 	// 2. Create a SequencedTaskRunner
 	// This runner acts like a virtual thread. Tasks posted to it are sequential.
-	runner := taskrunner.CreateTaskRunner(core.TaskTraits{
-		Priority: core.TaskPriorityUserVisible,
+	runner := taskrunner.CreateTaskRunner(taskrunner.TaskTraits{
+		Priority: taskrunner.TaskPriorityUserVisible,
 	})
 
 	done := make(chan struct{})
