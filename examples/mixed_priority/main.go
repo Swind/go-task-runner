@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	taskrunner "swind/go-task-runner"
-	"swind/go-task-runner/domain"
+	taskrunner "github.com/Swind/go-task-runner"
+	"github.com/Swind/go-task-runner/core"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 
 	fmt.Println("=== Mixed Priority Example ===")
 
-	runner := taskrunner.CreateTaskRunner(domain.DefaultTaskTraits())
+	runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
 	var wg sync.WaitGroup
 
 	// 1. Saturate the worker with a low priority task
@@ -27,7 +27,7 @@ func main() {
 		fmt.Println("Generic Low Priority Task Started (Blocking)")
 		time.Sleep(500 * time.Millisecond)
 		fmt.Println("Generic Low Priority Task Finished")
-	}, domain.TraitsBestEffort())
+	}, core.TraitsBestEffort())
 
 	// 2. Post a High Priority task immediately after
 	// Since the worker is blocked, this will be queued.
@@ -39,13 +39,13 @@ func main() {
 	// But here we use SequencedTaskRunner. If we post these to the SAME runner, they run sequentially (FIFO).
 	// To show Preemption/Priority scheduling, we should use two DIFFERENT runners.
 
-	runnerHigh := taskrunner.CreateTaskRunner(domain.TraitsUserBlocking())
+	runnerHigh := taskrunner.CreateTaskRunner(core.TraitsUserBlocking())
 
 	wg.Add(1)
 	runnerHigh.PostTaskWithTraits(func(ctx context.Context) {
 		defer wg.Done()
 		fmt.Println(">>> High Priority Runner Task Executed!")
-	}, domain.TraitsUserBlocking())
+	}, core.TraitsUserBlocking())
 
 	// Wait for completion
 	wg.Wait()

@@ -26,9 +26,15 @@ The core concepts derived from Chromium are:
 -   **Delayed Tasks**: Scheduling tasks in the future.
 -   **Task Traits**: Priority-aware task scheduling.
 
+## Installation
+
+```bash
+go get github.com/Swind/go-task-runner
+```
+
 ## Usage
 
-### 1. Initialize the Thread Pool
+### 1. Initialize the Global Thread Pool
 
 ```go
 package main
@@ -36,16 +42,18 @@ package main
 import (
     "context"
     "time"
-    "your/project/domain" // Import the domain package
+
+    taskrunner "github.com/Swind/go-task-runner"
+    "github.com/Swind/go-task-runner/core"
 )
 
 func main() {
-    ctx := context.Background()
+    // Initialize the global thread pool with 4 workers
+    taskrunner.InitGlobalThreadPool(4)
+    defer taskrunner.ShutdownGlobalThreadPool()
 
-    // Create a thread pool with 4 workers
-    pool := NewGoroutineThreadPool("worker-pool", 4)
-    pool.Start(ctx)
-    defer pool.Stop()
+    // Create a sequenced runner (like a logical thread)
+    runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
 
     // ...
 }
@@ -56,9 +64,6 @@ func main() {
 The `SequencedTaskRunner` is the recommended way to execute tasks. It ensures that tasks posted to the same runner are executed sequentially, removing the need for mutexes for state protected by that runner.
 
 ```go
-    // Create a sequenced runner (like a logical thread)
-    runner := domain.NewSequencedTaskRunner(pool)
-
     // Task 1
     runner.PostTask(func(ctx context.Context) {
         // This runs safely without locks relative to other tasks on this runner
@@ -76,8 +81,8 @@ The `SequencedTaskRunner` is the recommended way to execute tasks. It ensures th
 ```go
     runner.PostTaskWithTraits(func(ctx context.Context) {
         println("High priority work!")
-    }, domain.TaskTraits{
-        Priority: domain.TaskPriorityUserBlocking,
+    }, core.TaskTraits{
+        Priority: core.TaskPriorityUserBlocking,
     })
 ```
 

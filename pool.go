@@ -3,9 +3,10 @@ package taskrunner
 import (
 	"context"
 	"fmt"
-	"swind/go-task-runner/domain"
 	"sync"
 	"time"
+
+	"github.com/Swind/go-task-runner/core"
 )
 
 // GoroutineThreadPool manages a set of worker goroutines
@@ -13,7 +14,7 @@ import (
 type GoroutineThreadPool struct {
 	id        string
 	workers   int
-	scheduler *domain.TaskScheduler
+	scheduler *core.TaskScheduler
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -26,7 +27,7 @@ func NewGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
 	return &GoroutineThreadPool{
 		id:        id,
 		workers:   workers,
-		scheduler: domain.NewFIFOTaskScheduler(workers),
+		scheduler: core.NewFIFOTaskScheduler(workers),
 	}
 }
 
@@ -34,7 +35,7 @@ func NewPriorityGoroutineThreadPool(id string, workers int) *GoroutineThreadPool
 	return &GoroutineThreadPool{
 		id:        id,
 		workers:   workers,
-		scheduler: domain.NewPriorityTaskScheduler(workers),
+		scheduler: core.NewPriorityTaskScheduler(workers),
 	}
 }
 
@@ -141,11 +142,11 @@ func (tg *GoroutineThreadPool) DelayedTaskCount() int {
 	return tg.scheduler.DelayedTaskCount()
 }
 
-func (tg *GoroutineThreadPool) PostInternal(task domain.Task, traits domain.TaskTraits) {
+func (tg *GoroutineThreadPool) PostInternal(task core.Task, traits core.TaskTraits) {
 	tg.scheduler.PostInternal(task, traits)
 }
 
-func (tg *GoroutineThreadPool) PostDelayedInternal(task domain.Task, delay time.Duration, traits domain.TaskTraits, target domain.TaskRunner) {
+func (tg *GoroutineThreadPool) PostDelayedInternal(task core.Task, delay time.Duration, traits core.TaskTraits, target core.TaskRunner) {
 	tg.scheduler.PostDelayedInternal(task, delay, traits, target)
 }
 
@@ -197,10 +198,10 @@ func ShutdownGlobalThreadPool() {
 
 // CreateTaskRunner creates a new SequencedTaskRunner using the global thread pool.
 // This is the recommended way to get a new TaskRunner.
-func CreateTaskRunner(traits domain.TaskTraits) *domain.SequencedTaskRunner {
+func CreateTaskRunner(traits core.TaskTraits) *core.SequencedTaskRunner {
 	pool := GetGlobalThreadPool()
 	// Note: Currently SequencedTaskRunner ignores traits for the runner itself (it attaches traits to tasks).
 	// But in the future we might want to configure the runner with default traits.
 	// For now, we return a standard SequencedTaskRunner backed by the global pool.
-	return domain.NewSequencedTaskRunner(pool)
+	return core.NewSequencedTaskRunner(pool)
 }

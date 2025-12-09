@@ -2,15 +2,16 @@ package taskrunner
 
 import (
 	"context"
-	"swind/go-task-runner/domain"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Swind/go-task-runner/core"
 )
 
 // Ensure GoroutineThreadPool fully implements ThreadPool interface
-var _ domain.ThreadPool = (*GoroutineThreadPool)(nil)
+var _ core.ThreadPool = (*GoroutineThreadPool)(nil)
 
 func TestGoroutineThreadPool_Lifecycle(t *testing.T) {
 	pool := NewGoroutineThreadPool("test-pool", 2)
@@ -60,7 +61,7 @@ func TestGoroutineThreadPool_TaskExecution(t *testing.T) {
 
 	for i := 0; i < taskCount; i++ {
 		// We use PostInternal to simulate task submission via the interface
-		pool.PostInternal(task, domain.TaskTraits{})
+		pool.PostInternal(task, core.TaskTraits{})
 	}
 
 	wg.Wait()
@@ -84,7 +85,7 @@ func TestGoroutineThreadPool_Metrics(t *testing.T) {
 		bgDone <- struct{}{}
 	}
 
-	pool.PostInternal(blockingTask, domain.TaskTraits{})
+	pool.PostInternal(blockingTask, core.TaskTraits{})
 
 	// Wait a bit for worker to pick it up
 	time.Sleep(50 * time.Millisecond)
@@ -94,8 +95,8 @@ func TestGoroutineThreadPool_Metrics(t *testing.T) {
 	}
 
 	// 2. Queue more tasks
-	pool.PostInternal(func(ctx context.Context) {}, domain.TaskTraits{})
-	pool.PostInternal(func(ctx context.Context) {}, domain.TaskTraits{})
+	pool.PostInternal(func(ctx context.Context) {}, core.TaskTraits{})
+	pool.PostInternal(func(ctx context.Context) {}, core.TaskTraits{})
 
 	// Wait for queue update
 	time.Sleep(10 * time.Millisecond)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	taskrunner "swind/go-task-runner"
-	"swind/go-task-runner/domain"
+	taskrunner "github.com/Swind/go-task-runner"
+	"github.com/Swind/go-task-runner/core"
 )
 
 func main() {
@@ -14,7 +14,7 @@ func main() {
 	defer taskrunner.ShutdownGlobalThreadPool()
 
 	fmt.Println("=== Delayed Task Example ===")
-	runner := taskrunner.CreateTaskRunner(domain.DefaultTaskTraits())
+	runner := taskrunner.CreateTaskRunner(core.DefaultTaskTraits())
 
 	start := time.Now()
 
