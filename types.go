@@ -20,6 +20,9 @@ type TaskRunner = core.TaskRunner
 // SequencedTaskRunner ensures sequential execution of tasks
 type SequencedTaskRunner = core.SequencedTaskRunner
 
+// RepeatingTaskHandle controls the lifecycle of a repeating task
+type RepeatingTaskHandle = core.RepeatingTaskHandle
+
 // Priority constants
 const (
 	TaskPriorityBestEffort   TaskPriority = core.TaskPriorityBestEffort

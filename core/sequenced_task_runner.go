@@ -123,3 +123,86 @@ func (r *SequencedTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 	r.queue.Push(task, traits)
 	r.scheduleRunLoop(traits)
 }
+
+// =============================================================================
+// Repeating Task Implementation
+// =============================================================================
+
+// repeatingTaskHandle implements RepeatingTaskHandle interface
+type repeatingTaskHandle struct {
+	task     Task
+	interval time.Duration
+	traits   TaskTraits
+	stopped  atomic.Bool
+}
+
+func (h *repeatingTaskHandle) Stop() {
+	h.stopped.Store(true)
+}
+
+func (h *repeatingTaskHandle) IsStopped() bool {
+	return h.stopped.Load()
+}
+
+// createRepeatingTask creates a self-scheduling repeating task
+func (h *repeatingTaskHandle) createRepeatingTask() Task {
+	return func(ctx context.Context) {
+		// Check if stopped before execution
+		if h.IsStopped() {
+			return
+		}
+
+		// Execute the original task
+		h.task(ctx)
+
+		// After execution, reschedule if not stopped
+		if !h.IsStopped() {
+			// Get the current runner from context (avoid holding reference)
+			runner := GetCurrentTaskRunner(ctx)
+			if runner != nil {
+				// Reschedule itself
+				runner.PostDelayedTaskWithTraits(h.createRepeatingTask(), h.interval, h.traits)
+			}
+		}
+	}
+}
+
+// PostRepeatingTask submits a task that repeats at a fixed interval
+func (r *SequencedTaskRunner) PostRepeatingTask(task Task, interval time.Duration) RepeatingTaskHandle {
+	return r.PostRepeatingTaskWithTraits(task, interval, DefaultTaskTraits())
+}
+
+// PostRepeatingTaskWithTraits submits a repeating task with specific traits
+func (r *SequencedTaskRunner) PostRepeatingTaskWithTraits(
+	task Task,
+	interval time.Duration,
+	traits TaskTraits,
+) RepeatingTaskHandle {
+	return r.PostRepeatingTaskWithInitialDelay(task, 0, interval, traits)
+}
+
+// PostRepeatingTaskWithInitialDelay submits a repeating task with an initial delay
+// The task will first execute after initialDelay, then repeat every interval.
+func (r *SequencedTaskRunner) PostRepeatingTaskWithInitialDelay(
+	task Task,
+	initialDelay, interval time.Duration,
+	traits TaskTraits,
+) RepeatingTaskHandle {
+	handle := &repeatingTaskHandle{
+		task:     task,
+		interval: interval,
+		traits:   traits,
+	}
+
+	// Create the self-scheduling repeating task
+	repeatingTask := handle.createRepeatingTask()
+
+	// Schedule first execution based on initialDelay
+	if initialDelay > 0 {
+		r.PostDelayedTaskWithTraits(repeatingTask, initialDelay, traits)
+	} else {
+		r.PostTaskWithTraits(repeatingTask, traits)
+	}
+
+	return handle
+}

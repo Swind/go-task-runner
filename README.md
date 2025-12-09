@@ -24,6 +24,7 @@ The core concepts derived from Chromium are:
 -   **Goroutine Thread Pool**: Efficient worker pool backing the execution model.
 -   **Sequenced Task Runner**: Strict FIFO execution order for tasks within a stream.
 -   **Delayed Tasks**: Scheduling tasks in the future.
+-   **Repeating Tasks**: Execute tasks repeatedly at fixed intervals with easy stop control.
 -   **Task Traits**: Priority-aware task scheduling.
 
 ## Installation
@@ -84,6 +85,30 @@ The `SequencedTaskRunner` is the recommended way to execute tasks. It ensures th
         Priority: taskrunner.TaskPriorityUserBlocking,
     })
 ```
+
+### 4. Repeating Tasks
+
+Execute tasks repeatedly at fixed intervals:
+
+```go
+    // Simple repeating task
+    handle := runner.PostRepeatingTask(func(ctx context.Context) {
+        println("Runs every second")
+    }, 1*time.Second)
+
+    // Stop when done
+    defer handle.Stop()
+
+    // With initial delay
+    handle := runner.PostRepeatingTaskWithInitialDelay(
+        task,
+        2*time.Second,  // Start after 2 seconds
+        1*time.Second,  // Then repeat every second
+        taskrunner.DefaultTaskTraits(),
+    )
+```
+
+See [examples/repeating_task](examples/repeating_task/main.go) for more examples.
 
 ## Architecture
 

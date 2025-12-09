@@ -60,6 +60,25 @@ type TaskRunner interface {
 
 	// [v2.1 New] Support delayed tasks with specific traits
 	PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits)
+
+	// [v2.2 New] Support repeating tasks
+	PostRepeatingTask(task Task, interval time.Duration) RepeatingTaskHandle
+	PostRepeatingTaskWithTraits(task Task, interval time.Duration, traits TaskTraits) RepeatingTaskHandle
+	PostRepeatingTaskWithInitialDelay(task Task, initialDelay, interval time.Duration, traits TaskTraits) RepeatingTaskHandle
+}
+
+// =============================================================================
+// RepeatingTaskHandle: Control repeating task lifecycle
+// =============================================================================
+
+// RepeatingTaskHandle controls the lifecycle of a repeating task.
+type RepeatingTaskHandle interface {
+	// Stop stops the repeating task. It will not interrupt a currently executing task,
+	// but will prevent future executions from being scheduled.
+	Stop()
+
+	// IsStopped returns true if the task has been stopped.
+	IsStopped() bool
 }
 
 // =============================================================================

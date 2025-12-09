@@ -212,3 +212,12 @@ func (m *MockTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 func (m *MockTaskRunner) PostDelayedTask(task Task, delay time.Duration) {}
 func (m *MockTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
 }
+func (m *MockTaskRunner) PostRepeatingTask(task Task, interval time.Duration) RepeatingTaskHandle {
+	return nil
+}
+func (m *MockTaskRunner) PostRepeatingTaskWithTraits(task Task, interval time.Duration, traits TaskTraits) RepeatingTaskHandle {
+	return nil
+}
+func (m *MockTaskRunner) PostRepeatingTaskWithInitialDelay(task Task, initialDelay, interval time.Duration, traits TaskTraits) RepeatingTaskHandle {
+	return nil
+}
