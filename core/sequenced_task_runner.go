@@ -241,3 +241,25 @@ func (r *SequencedTaskRunner) Shutdown() {
 func (r *SequencedTaskRunner) IsClosed() bool {
 	return r.closed.Load()
 }
+
+// =============================================================================
+// Task and Reply Pattern
+// =============================================================================
+
+// PostTaskAndReply executes task on this runner, then posts reply to replyRunner.
+// If task panics, reply will not be executed.
+func (r *SequencedTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {
+	postTaskAndReplyInternal(r, task, reply, replyRunner, DefaultTaskTraits())
+}
+
+// PostTaskAndReplyWithTraits allows specifying different traits for task and reply.
+// This is useful when task is background work (BestEffort) but reply is UI update (UserVisible).
+func (r *SequencedTaskRunner) PostTaskAndReplyWithTraits(
+	task Task,
+	taskTraits TaskTraits,
+	reply Task,
+	replyTraits TaskTraits,
+	replyRunner TaskRunner,
+) {
+	postTaskAndReplyInternalWithTraits(r, task, taskTraits, reply, replyTraits, replyRunner)
+}

@@ -62,6 +62,16 @@ type TaskRunner interface {
 	PostRepeatingTask(task Task, interval time.Duration) RepeatingTaskHandle
 	PostRepeatingTaskWithTraits(task Task, interval time.Duration, traits TaskTraits) RepeatingTaskHandle
 	PostRepeatingTaskWithInitialDelay(task Task, initialDelay, interval time.Duration, traits TaskTraits) RepeatingTaskHandle
+
+	// [v2.3 New] Support task and reply pattern
+	// PostTaskAndReply executes task on this runner, then posts reply to replyRunner
+	PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner)
+	// PostTaskAndReplyWithTraits allows specifying traits for both task and reply
+	PostTaskAndReplyWithTraits(task Task, taskTraits TaskTraits, reply Task, replyTraits TaskTraits, replyRunner TaskRunner)
+
+	// Lifecycle management
+	Shutdown()
+	IsClosed() bool
 }
 
 // =============================================================================
@@ -91,3 +101,15 @@ func GetCurrentTaskRunner(ctx context.Context) TaskRunner {
 	}
 	return nil
 }
+
+// =============================================================================
+// Task and Reply Pattern with Generic Return Values
+// =============================================================================
+
+// TaskWithResult defines a task that returns a result of type T and an error.
+// This is used with PostTaskAndReplyWithResult to pass data from task to reply.
+type TaskWithResult[T any] func(ctx context.Context) (T, error)
+
+// ReplyWithResult defines a reply callback that receives a result of type T and an error.
+// This is the counterpart to TaskWithResult, receiving the values returned by the task.
+type ReplyWithResult[T any] func(ctx context.Context, result T, err error)

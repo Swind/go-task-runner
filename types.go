@@ -55,3 +55,10 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 
 // ThreadPool is re-exported for type compatibility
 type ThreadPool = core.ThreadPool
+
+// TaskWithResult and ReplyWithResult for generic PostTaskAndReply pattern
+type TaskWithResult[T any] = core.TaskWithResult[T]
+type ReplyWithResult[T any] = core.ReplyWithResult[T]
+
+// GetCurrentTaskRunner retrieves the current TaskRunner from context
+var GetCurrentTaskRunner = core.GetCurrentTaskRunner

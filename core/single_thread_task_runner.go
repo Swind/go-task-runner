@@ -227,3 +227,28 @@ func (h *singleThreadRepeatingHandle) createRepeatingTask() Task {
 		}
 	}
 }
+
+// =============================================================================
+// Task and Reply Pattern
+// =============================================================================
+
+// PostTaskAndReply executes task on this runner, then posts reply to replyRunner.
+// If task panics, reply will not be executed.
+// Both task and reply will execute on the same dedicated goroutine if replyRunner is this runner.
+func (r *SingleThreadTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {
+	postTaskAndReplyInternal(r, task, reply, replyRunner, DefaultTaskTraits())
+}
+
+// PostTaskAndReplyWithTraits allows specifying different traits for task and reply.
+// This is useful when task is background work (BestEffort) but reply is UI update (UserVisible).
+// Note: For SingleThreadTaskRunner, traits don't affect execution order since all tasks
+// run sequentially on the same goroutine, but they may be used for logging or metrics.
+func (r *SingleThreadTaskRunner) PostTaskAndReplyWithTraits(
+	task Task,
+	taskTraits TaskTraits,
+	reply Task,
+	replyTraits TaskTraits,
+	replyRunner TaskRunner,
+) {
+	postTaskAndReplyInternalWithTraits(r, task, taskTraits, reply, replyTraits, replyRunner)
+}

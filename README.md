@@ -23,8 +23,10 @@ The core concepts derived from Chromium are:
 
 -   **Goroutine Thread Pool**: Efficient worker pool backing the execution model.
 -   **Sequenced Task Runner**: Strict FIFO execution order for tasks within a stream.
+-   **Single Thread Task Runner**: Guaranteed thread affinity for blocking IO and TLS.
 -   **Delayed Tasks**: Scheduling tasks in the future.
 -   **Repeating Tasks**: Execute tasks repeatedly at fixed intervals with easy stop control.
+-   **Task and Reply Pattern**: Execute task on one runner, reply on another with type-safe return values.
 -   **Task Traits**: Priority-aware task scheduling.
 
 ## Installation
@@ -103,6 +105,57 @@ The `SingleThreadTaskRunner` guarantees that all tasks execute on the same dedic
 ```
 
 See [examples/single_thread](examples/single_thread/main.go) for more examples.
+
+### 2.2 Using PostTaskAndReply Pattern
+
+The `PostTaskAndReply` pattern allows you to execute a task on one runner, then automatically post a reply to another runner when the task completes. This is perfect for UI/background work patterns.
+
+```go
+    uiRunner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
+    bgRunner := taskrunner.CreateTaskRunner(taskrunner.TraitsBestEffort())
+
+    uiRunner.PostTask(func(ctx context.Context) {
+        me := taskrunner.GetCurrentTaskRunner(ctx)
+
+        // Execute task on background runner, reply back to UI runner
+        bgRunner.PostTaskAndReply(
+            func(ctx context.Context) {
+                // Heavy work on background thread
+                loadDataFromServer()
+            },
+            func(ctx context.Context) {
+                // Update UI on UI thread
+                updateUI()
+            },
+            me, // Reply back to UI runner
+        )
+    })
+```
+
+**With Return Values (Generic):**
+
+Use `PostTaskAndReplyWithResult` to pass data from task to reply:
+
+```go
+    core.PostTaskAndReplyWithResult(
+        bgRunner,
+        func(ctx context.Context) (*UserData, error) {
+            // Returns data and error
+            return fetchUserFromDB(ctx)
+        },
+        func(ctx context.Context, user *UserData, err error) {
+            // Receives data and error
+            if err != nil {
+                showError(err)
+                return
+            }
+            updateUserUI(user)
+        },
+        uiRunner,
+    )
+```
+
+See [examples/task_and_reply](examples/task_and_reply/main.go) for more examples.
 
 ### 3. Using Task Traits (Priorities)
 

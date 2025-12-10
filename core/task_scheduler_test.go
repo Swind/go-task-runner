@@ -221,3 +221,8 @@ func (m *MockTaskRunner) PostRepeatingTaskWithTraits(task Task, interval time.Du
 func (m *MockTaskRunner) PostRepeatingTaskWithInitialDelay(task Task, initialDelay, interval time.Duration, traits TaskTraits) RepeatingTaskHandle {
 	return nil
 }
+func (m *MockTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {}
+func (m *MockTaskRunner) PostTaskAndReplyWithTraits(task Task, taskTraits TaskTraits, reply Task, replyTraits TaskTraits, replyRunner TaskRunner) {
+}
+func (m *MockTaskRunner) Shutdown()      {}
+func (m *MockTaskRunner) IsClosed() bool { return false }
