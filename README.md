@@ -76,6 +76,34 @@ The `SequencedTaskRunner` is the recommended way to execute tasks. It ensures th
     }, 1 * time.Second)
 ```
 
+### 2.1 Using SingleThreadTaskRunner
+
+The `SingleThreadTaskRunner` guarantees that all tasks execute on the same dedicated goroutine (thread affinity). This is useful for:
+
+- **Blocking IO operations** (e.g., NetworkReceiver with blocking reads)
+- **CGO calls** that require Thread Local Storage
+- **UI Thread simulation** where tasks must run on a specific thread
+
+```go
+    // Create a single-threaded runner
+    runner := taskrunner.NewSingleThreadTaskRunner()
+    defer runner.Stop()
+
+    // All tasks run on the same dedicated goroutine
+    runner.PostTask(func(ctx context.Context) {
+        // Blocking IO operation - safe on dedicated thread
+        data := blockingRead()
+        process(data)
+    })
+
+    // Delayed task - still on same goroutine
+    runner.PostDelayedTask(func(ctx context.Context) {
+        println("Runs on same goroutine after delay")
+    }, 1 * time.Second)
+```
+
+See [examples/single_thread](examples/single_thread/main.go) for more examples.
+
 ### 3. Using Task Traits (Priorities)
 
 ```go

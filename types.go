@@ -20,6 +20,9 @@ type TaskRunner = core.TaskRunner
 // SequencedTaskRunner ensures sequential execution of tasks
 type SequencedTaskRunner = core.SequencedTaskRunner
 
+// SingleThreadTaskRunner ensures all tasks execute on the same dedicated goroutine
+type SingleThreadTaskRunner = core.SingleThreadTaskRunner
+
 // RepeatingTaskHandle controls the lifecycle of a repeating task
 type RepeatingTaskHandle = core.RepeatingTaskHandle
 
@@ -42,6 +45,12 @@ var (
 // This is re-exported for advanced users who want to create runners with custom pools.
 func NewSequencedTaskRunner(pool ThreadPool) *SequencedTaskRunner {
 	return core.NewSequencedTaskRunner(pool)
+}
+
+// NewSingleThreadTaskRunner creates a new SingleThreadTaskRunner with a dedicated goroutine.
+// Use this for blocking IO operations, CGO calls with thread-local storage, or UI thread simulation.
+func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
+	return core.NewSingleThreadTaskRunner()
 }
 
 // ThreadPool is re-exported for type compatibility
