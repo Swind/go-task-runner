@@ -50,9 +50,6 @@ func TraitsUserVisible() TaskTraits {
 	return TaskTraits{Priority: TaskPriorityUserVisible}
 }
 
-// =============================================================================
-// TaskRunner: Define task submission interface
-// =============================================================================
 type TaskRunner interface {
 	PostTask(task Task)
 	PostTaskWithTraits(task Task, traits TaskTraits)

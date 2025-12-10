@@ -13,7 +13,8 @@ type SequencedTaskRunner struct {
 	queue         TaskQueue
 	mu            sync.Mutex
 	isRunning     bool
-	activeRunners int32 // atomic guard for concurrency assertion
+	activeRunners int32      // atomic guard for concurrency assertion
+	closed        atomic.Bool // indicates if the runner is closed
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -147,7 +148,15 @@ func (h *repeatingTaskHandle) IsStopped() bool {
 // createRepeatingTask creates a self-scheduling repeating task
 func (h *repeatingTaskHandle) createRepeatingTask() Task {
 	return func(ctx context.Context) {
-		// Check if stopped before execution
+		// Get the current runner from context
+		runner := GetCurrentTaskRunner(ctx)
+
+		// Check if runner is closed (automatic cleanup)
+		if r, ok := runner.(*SequencedTaskRunner); ok && r.IsClosed() {
+			return
+		}
+
+		// Check if handle is manually stopped
 		if h.IsStopped() {
 			return
 		}
@@ -155,14 +164,14 @@ func (h *repeatingTaskHandle) createRepeatingTask() Task {
 		// Execute the original task
 		h.task(ctx)
 
-		// After execution, reschedule if not stopped
-		if !h.IsStopped() {
-			// Get the current runner from context (avoid holding reference)
-			runner := GetCurrentTaskRunner(ctx)
-			if runner != nil {
-				// Reschedule itself
-				runner.PostDelayedTaskWithTraits(h.createRepeatingTask(), h.interval, h.traits)
+		// After execution, reschedule if not stopped and runner is still open
+		if !h.IsStopped() && runner != nil {
+			// Check again before rescheduling
+			if r, ok := runner.(*SequencedTaskRunner); ok && r.IsClosed() {
+				return
 			}
+			// Reschedule itself
+			runner.PostDelayedTaskWithTraits(h.createRepeatingTask(), h.interval, h.traits)
 		}
 	}
 }
@@ -205,4 +214,30 @@ func (r *SequencedTaskRunner) PostRepeatingTaskWithInitialDelay(
 	}
 
 	return handle
+}
+
+// =============================================================================
+// Shutdown and Lifecycle Management
+// =============================================================================
+
+// Shutdown gracefully stops the runner by:
+// 1. Marking it as closed (stops accepting new tasks)
+// 2. Clearing all pending tasks in the queue
+// 3. All repeating tasks will automatically stop on their next execution
+//
+// Note: This will not interrupt currently executing tasks.
+func (r *SequencedTaskRunner) Shutdown() {
+	// Mark as closed
+	r.closed.Store(true)
+
+	// Clear the queue
+	r.mu.Lock()
+	r.queue = NewFIFOTaskQueue()
+	r.isRunning = false
+	r.mu.Unlock()
+}
+
+// IsClosed returns true if the runner has been shut down.
+func (r *SequencedTaskRunner) IsClosed() bool {
+	return r.closed.Load()
 }

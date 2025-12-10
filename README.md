@@ -110,6 +110,26 @@ Execute tasks repeatedly at fixed intervals:
 
 See [examples/repeating_task](examples/repeating_task/main.go) for more examples.
 
+### 5. Shutdown and Cleanup
+
+Gracefully shutdown a runner to stop all tasks:
+
+```go
+    runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
+
+    // Add tasks and repeating tasks...
+
+    // Shutdown when done
+    runner.Shutdown()  // Clears queue, stops all repeating tasks
+
+    // Check if closed
+    if runner.IsClosed() {
+        println("Runner is closed")
+    }
+```
+
+See [examples/shutdown](examples/shutdown/main.go) for more examples.
+
 ## Architecture
 
 See [DESIGN.md](DESIGN.md) for a deep dive into the internal architecture, including how the `TaskScheduler`, `DelayManager`, and `TaskQueue` interact.
