@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -103,5 +104,107 @@ func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
 
 	if len(executionOrder) != 3 {
 		t.Errorf("All tasks should operate")
+	}
+}
+
+func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
+	mockPool := &MockThreadPool{}
+	runner := NewSequencedTaskRunner(mockPool)
+
+	var executed atomic.Int32
+	// Task that increments counter
+	task1 := func(ctx context.Context) { executed.Add(1) }
+	runner.PostTask(task1)
+
+	// Simulate runLoop execution for the posted task
+	if len(mockPool.postedTasks) != 1 {
+		t.Fatalf("expected 1 posted runLoop task, got %d", len(mockPool.postedTasks))
+	}
+	runLoop := mockPool.postedTasks[0].Task
+	mockPool.postedTasks = nil
+	runLoop(context.Background())
+
+	// Verify task1 ran
+	if executed.Load() != 1 {
+		t.Fatalf("task1 should have executed before shutdown")
+	}
+
+	// Shutdown the runner
+	runner.Shutdown()
+
+	// Attempt to post another task after shutdown
+	task2 := func(ctx context.Context) { executed.Add(1) }
+	runner.PostTask(task2)
+
+	// No new runLoop should be posted
+	if len(mockPool.postedTasks) != 0 {
+		t.Fatalf("no runLoop should be posted after shutdown")
+	}
+
+	// Ensure counter unchanged
+	if executed.Load() != 1 {
+		t.Fatalf("task2 should not have executed after shutdown")
+	}
+}
+
+func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
+	mockPool := &MockThreadPool{}
+	runner := NewSequencedTaskRunner(mockPool)
+
+	var executed atomic.Int32
+	task1 := func(ctx context.Context) { executed.Add(1) }
+	task2 := func(ctx context.Context) { executed.Add(1) }
+
+	// Post two tasks
+	runner.PostTask(task1)
+	runner.PostTask(task2)
+
+	// Shutdown before any runLoop execution
+	runner.Shutdown()
+
+	// Run the posted runLoop (only one should be posted for first task)
+	if len(mockPool.postedTasks) != 1 {
+		t.Fatalf("expected 1 runLoop task posted, got %d", len(mockPool.postedTasks))
+	}
+	runLoop := mockPool.postedTasks[0].Task
+	mockPool.postedTasks = nil
+	runLoop(context.Background())
+
+	// Only first task should have executed; second cleared
+	if executed.Load() != 0 {
+		t.Fatalf("no tasks should execute after shutdown, got %d", executed.Load())
+	}
+}
+
+func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T) {
+	mockPool := &MockThreadPool{}
+	runner := NewSequencedTaskRunner(mockPool)
+
+	var executed atomic.Int32
+	// Task that shuts down runner and then tries to post another task
+	task1 := func(ctx context.Context) {
+		executed.Add(1)
+		runner.Shutdown()
+		// Attempt to post a second task
+		runner.PostTask(func(ctx context.Context) { executed.Add(1) })
+	}
+
+	runner.PostTask(task1)
+
+	// Run the runLoop
+	if len(mockPool.postedTasks) != 1 {
+		t.Fatalf("expected runLoop task posted, got %d", len(mockPool.postedTasks))
+	}
+	runLoop := mockPool.postedTasks[0].Task
+	mockPool.postedTasks = nil
+	runLoop(context.Background())
+
+	// No additional runLoop should be posted after shutdown
+	if len(mockPool.postedTasks) != 0 {
+		t.Fatalf("no additional runLoop should be posted after shutdown inside task")
+	}
+
+	if executed.Load() != 1 {
+		t.Fatalf("only the first task should have executed, got %d", executed.Load())
 	}
 }

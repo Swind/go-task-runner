@@ -69,8 +69,25 @@ type TaskRunner interface {
 	// PostTaskAndReplyWithTraits allows specifying traits for both task and reply
 	PostTaskAndReplyWithTraits(task Task, taskTraits TaskTraits, reply Task, replyTraits TaskTraits, replyRunner TaskRunner)
 
-	// Lifecycle management
+	// [v2.4 New] Synchronization and lifecycle management
+	// WaitIdle blocks until all currently queued tasks have completed execution
+	// Tasks posted after WaitIdle is called are not waited for
+	// Returns error if context is cancelled or runner is closed
+	WaitIdle(ctx context.Context) error
+
+	// FlushAsync posts a barrier task that executes callback when all prior tasks complete
+	// This is a non-blocking alternative to WaitIdle
+	FlushAsync(callback func())
+
+	// WaitShutdown blocks until Shutdown() is called on this runner
+	// Returns error if context is cancelled
+	WaitShutdown(ctx context.Context) error
+
+	// Shutdown marks the runner as closed and clears all pending tasks
+	// This method is non-blocking and can be safely called from within a task
 	Shutdown()
+
+	// IsClosed returns true if the runner has been shut down
 	IsClosed() bool
 }
 

@@ -28,9 +28,11 @@ type SingleThreadTaskRunner struct {
 	cancel context.CancelFunc
 
 	// For graceful shutdown
-	stopped chan struct{}
-	once    sync.Once
-	closed  atomic.Bool
+	stopped      chan struct{}
+	once         sync.Once
+	closed       atomic.Bool
+	shutdownChan chan struct{}
+	shutdownOnce sync.Once
 }
 
 // NewSingleThreadTaskRunner creates and starts a new SingleThreadTaskRunner.
@@ -38,10 +40,11 @@ type SingleThreadTaskRunner struct {
 func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &SingleThreadTaskRunner{
-		workQueue: make(chan Task, 100), // Buffer to avoid blocking senders
-		ctx:       ctx,
-		cancel:    cancel,
-		stopped:   make(chan struct{}),
+		workQueue:    make(chan Task, 100), // Buffer to avoid blocking senders
+		ctx:          ctx,
+		cancel:       cancel,
+		stopped:      make(chan struct{}),
+		shutdownChan: make(chan struct{}),
 	}
 
 	// Start the dedicated message loop
@@ -136,9 +139,25 @@ func (r *SingleThreadTaskRunner) PostRepeatingTaskWithInitialDelay(
 	return handle
 }
 
-// Shutdown gracefully stops the runner
+// Shutdown marks the runner as closed and signals shutdown waiters.
+// Unlike Stop(), this method does NOT immediately terminate the runLoop.
+// This allows tasks to call Shutdown() from within themselves.
+//
+// After calling Shutdown():
+// - WaitShutdown() will return
+// - IsClosed() will return true
+// - New tasks posted will be ignored
+// - Existing queued tasks will still execute
+// - Call Stop() to actually terminate the runLoop
 func (r *SingleThreadTaskRunner) Shutdown() {
-	r.Stop()
+	r.shutdownOnce.Do(func() {
+		// Mark as closed
+		r.closed.Store(true)
+		// Cancel context to stop accepting new tasks and unblock runLoop
+		r.cancel()
+		// Close shutdown channel to signal waiters
+		close(r.shutdownChan)
+	})
 }
 
 // IsClosed returns true if the runner has been stopped
@@ -164,6 +183,9 @@ func (r *SingleThreadTaskRunner) Stop() {
 func (r *SingleThreadTaskRunner) runLoop() {
 	defer close(r.stopped) // Signal that Stop() can return
 
+	// Create context with taskRunnerKey for GetCurrentTaskRunner
+	runCtx := context.WithValue(r.ctx, taskRunnerKey, r)
+
 	for {
 		select {
 		case task := <-r.workQueue:
@@ -174,7 +196,7 @@ func (r *SingleThreadTaskRunner) runLoop() {
 						fmt.Printf("[SingleThreadTaskRunner] Panic: %v\n", rec)
 					}
 				}()
-				task(r.ctx)
+				task(runCtx)
 			}()
 
 		case <-r.ctx.Done():
@@ -251,4 +273,94 @@ func (r *SingleThreadTaskRunner) PostTaskAndReplyWithTraits(
 	replyRunner TaskRunner,
 ) {
 	postTaskAndReplyInternalWithTraits(r, task, taskTraits, reply, replyTraits, replyRunner)
+}
+
+// =============================================================================
+// Synchronization Methods
+// =============================================================================
+
+// WaitIdle blocks until all currently queued tasks have completed execution.
+// This is implemented by posting a barrier task and waiting for it to execute.
+//
+// Since SingleThreadTaskRunner executes tasks sequentially on a dedicated goroutine,
+// when the barrier task executes, all tasks posted before WaitIdle are guaranteed
+// to have completed.
+//
+// Returns error if:
+// - Context is cancelled or deadline exceeded
+// - Runner is closed when WaitIdle is called
+//
+// Note: Tasks posted after WaitIdle is called are not waited for.
+// Note: Repeating tasks will continue to repeat and are not waited for.
+func (r *SingleThreadTaskRunner) WaitIdle(ctx context.Context) error {
+	if r.IsClosed() {
+		return fmt.Errorf("runner is closed")
+	}
+
+	done := make(chan struct{})
+
+	// Post a barrier task that closes the done channel
+	r.PostTask(func(taskCtx context.Context) {
+		close(done)
+	})
+
+	// Wait for barrier task or context cancellation
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// FlushAsync posts a barrier task that executes the callback when all prior tasks complete.
+// This is a non-blocking alternative to WaitIdle.
+//
+// The callback will be executed on this runner's dedicated goroutine, after all tasks
+// posted before FlushAsync have completed.
+//
+// Example:
+//
+//	runner.PostTask(task1)
+//	runner.PostTask(task2)
+//	runner.FlushAsync(func() {
+//	    fmt.Println("task1 and task2 completed!")
+//	})
+func (r *SingleThreadTaskRunner) FlushAsync(callback func()) {
+	r.PostTask(func(ctx context.Context) {
+		callback()
+	})
+}
+
+// WaitShutdown blocks until Shutdown() is called on this runner.
+//
+// This is useful for waiting for the runner to be shut down, either by
+// an external caller or by a task running on the runner itself.
+//
+// Returns error if context is cancelled or deadline exceeded.
+//
+// Example:
+//
+//	// IO thread: receives messages and posts shutdown when condition met
+//	ioRunner.PostTask(func(ctx context.Context) {
+//	    for {
+//	        msg := receiveMessage()
+//	        mainRunner.PostTask(func(ctx context.Context) {
+//	            if shouldShutdown(msg) {
+//	                me := GetCurrentTaskRunner(ctx)
+//	                me.Shutdown()
+//	            }
+//	        })
+//	    }
+//	})
+//
+//	// Main thread waits for shutdown
+//	mainRunner.WaitShutdown(context.Background())
+func (r *SingleThreadTaskRunner) WaitShutdown(ctx context.Context) error {
+	select {
+	case <-r.shutdownChan:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
