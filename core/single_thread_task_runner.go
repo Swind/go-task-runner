@@ -33,6 +33,11 @@ type SingleThreadTaskRunner struct {
 	closed       atomic.Bool
 	shutdownChan chan struct{}
 	shutdownOnce sync.Once
+
+	// Metadata
+	name     string
+	metadata map[string]interface{}
+	mu       sync.Mutex
 }
 
 // NewSingleThreadTaskRunner creates and starts a new SingleThreadTaskRunner.
@@ -45,12 +50,47 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 		cancel:       cancel,
 		stopped:      make(chan struct{}),
 		shutdownChan: make(chan struct{}),
+		metadata:     make(map[string]interface{}),
 	}
 
 	// Start the dedicated message loop
 	go r.runLoop()
 
 	return r
+}
+
+// Name returns the name of the task runner
+func (r *SingleThreadTaskRunner) Name() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.name
+}
+
+// SetName sets the name of the task runner
+func (r *SingleThreadTaskRunner) SetName(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.name = name
+}
+
+// Metadata returns the metadata associated with the task runner
+func (r *SingleThreadTaskRunner) Metadata() map[string]interface{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Return a copy to avoid race conditions
+	result := make(map[string]interface{}, len(r.metadata))
+	for k, v := range r.metadata {
+		result[k] = v
+	}
+	return result
+}
+
+// SetMetadata sets a metadata key-value pair
+func (r *SingleThreadTaskRunner) SetMetadata(key string, value interface{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.metadata[key] = value
 }
 
 // PostTask submits a task for execution

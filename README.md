@@ -201,7 +201,7 @@ Gracefully shutdown a runner to stop all tasks:
     // Add tasks and repeating tasks...
 
     // Shutdown when done
-    runner.Shutdown()  // Clears queue, stops all repeating tasks
+    runner.Shutdown()  // Prevents new tasks, clears pending queue, stops all repeating tasks
 
     // Check if closed
     if runner.IsClosed() {

@@ -17,6 +17,10 @@ type SequencedTaskRunner struct {
 	closed        atomic.Bool // indicates if the runner is closed
 	shutdownChan  chan struct{}
 	shutdownOnce  sync.Once
+
+	// Metadata
+	name     string
+	metadata map[string]interface{}
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -24,7 +28,42 @@ func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
 		threadPool:   threadPool,
 		queue:        NewFIFOTaskQueue(),
 		shutdownChan: make(chan struct{}),
+		metadata:     make(map[string]interface{}),
 	}
+}
+
+// Name returns the name of the task runner
+func (r *SequencedTaskRunner) Name() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.name
+}
+
+// SetName sets the name of the task runner
+func (r *SequencedTaskRunner) SetName(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.name = name
+}
+
+// Metadata returns the metadata associated with the task runner
+func (r *SequencedTaskRunner) Metadata() map[string]interface{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Return a copy to avoid race conditions
+	result := make(map[string]interface{}, len(r.metadata))
+	for k, v := range r.metadata {
+		result[k] = v
+	}
+	return result
+}
+
+// SetMetadata sets a metadata key-value pair
+func (r *SequencedTaskRunner) SetMetadata(key string, value interface{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.metadata[key] = value
 }
 
 func (r *SequencedTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {

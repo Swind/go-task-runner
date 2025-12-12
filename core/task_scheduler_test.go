@@ -224,8 +224,10 @@ func (m *MockTaskRunner) PostRepeatingTaskWithInitialDelay(task Task, initialDel
 func (m *MockTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {}
 func (m *MockTaskRunner) PostTaskAndReplyWithTraits(task Task, taskTraits TaskTraits, reply Task, replyTraits TaskTraits, replyRunner TaskRunner) {
 }
-func (m *MockTaskRunner) WaitIdle(ctx context.Context) error       { return nil }
-func (m *MockTaskRunner) FlushAsync(callback func())               {}
-func (m *MockTaskRunner) WaitShutdown(ctx context.Context) error   { return nil }
-func (m *MockTaskRunner) Shutdown()                                {}
-func (m *MockTaskRunner) IsClosed() bool                           { return false }
+func (m *MockTaskRunner) WaitIdle(ctx context.Context) error     { return nil }
+func (m *MockTaskRunner) FlushAsync(callback func())             {}
+func (m *MockTaskRunner) WaitShutdown(ctx context.Context) error { return nil }
+func (m *MockTaskRunner) Shutdown()                              {}
+func (m *MockTaskRunner) IsClosed() bool                         { return false }
+func (m *MockTaskRunner) Name() string                           { return "MockTaskRunner" }
+func (m *MockTaskRunner) Metadata() map[string]interface{}       { return nil }

@@ -89,6 +89,12 @@ type TaskRunner interface {
 
 	// IsClosed returns true if the runner has been shut down
 	IsClosed() bool
+
+	// [v2.5 New] Identification and Metadata
+	// Name returns the name of the task runner
+	Name() string
+	// Metadata returns the metadata associated with the task runner
+	Metadata() map[string]interface{}
 }
 
 // =============================================================================
