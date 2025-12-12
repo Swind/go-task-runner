@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -424,4 +425,102 @@ func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
 	if executed.Load() != 1 {
 		t.Errorf("Task should have executed, executed count: %d", executed.Load())
 	}
+}
+
+func TestSequencedTaskRunner_GarbageCollection(t *testing.T) {
+	// 1. Setup
+	// Create a channel to signal finalizer execution
+	finalizerCalled := make(chan struct{})
+
+	// Create a scope to ensure runner reference is dropped
+	func() {
+		// Use a real pool or mock pool (interface satisfaction is key)
+		pool := &MockThreadPool{}
+		runner := core.NewSequencedTaskRunner(pool)
+
+		// Set finalizer
+		runtime.SetFinalizer(runner, func(r *core.SequencedTaskRunner) {
+			close(finalizerCalled)
+		})
+
+		// Shutdown the runner (optional, but good practice to release resources)
+		runner.Shutdown()
+
+		// runner goes out of scope here
+	}()
+
+	// 2. Trigger GC
+	// We might need multiple GC cycles to ensure collection
+	for i := 0; i < 5; i++ {
+		runtime.GC()
+		select {
+		case <-finalizerCalled:
+			return // Success
+		case <-time.After(100 * time.Millisecond):
+			// Continue trying
+		}
+	}
+
+	t.Fatal("SequencedTaskRunner was not garbage collected (finalizer not called)")
+}
+
+func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) {
+	// 1. Setup
+	finalizerCalled := make(chan struct{})
+
+	// Create a scope to ensure runner reference is dropped
+	func() {
+		// Use a real GoroutineThreadPool
+		pool := taskrunner.NewGoroutineThreadPool("gc-test-pool", 2)
+		pool.Start(context.Background())
+		// Ensure pool is stopped to clean up its own resources, though for this test
+		// we mainly care about the runner being collected.
+		// Note: stopping the pool might be important if the pool holds references.
+		// However, SequencedTaskRunner holds reference TO the pool, not vice versa (usually).
+		// But tasks in the pool hold reference to the runner (in the closure).
+		// So we must ensure no tasks are pending that reference the runner.
+		defer pool.Stop()
+
+		runner := core.NewSequencedTaskRunner(pool)
+
+		// Post a task to ensure it's working and tied to the pool
+		done := make(chan struct{})
+		runner.PostTask(func(ctx context.Context) {
+			close(done)
+		})
+		<-done
+
+		// Set finalizer
+		runtime.SetFinalizer(runner, func(r *core.SequencedTaskRunner) {
+			close(finalizerCalled)
+		})
+
+		// Shutdown the runner
+		// This is CRITICAL. It clears the queue and sets isRunning=false.
+		// If we don't shutdown, and if there were pending tasks (there aren't here),
+		// or if the runner was somehow registered in the pool (it isn't generally, mostly tasks),
+		// it might stay alive.
+		// More importantly, the user code is expected to Shutdown() before losing reference if they want clean cleanup,
+		// though GC should technically work if no goroutines reference it.
+		// But SequencedTaskRunner has a 'runLoop' executed by the pool.
+		// If runLoop is active, it references 'r'.
+		// runLoop terminates when queue is empty.
+		// So if queue is empty, runLoop should exit, and pool should drop reference to runLoop closure.
+		runner.Shutdown()
+
+		// runner goes out of scope here
+	}()
+
+	// 2. Trigger GC
+	for i := 0; i < 10; i++ {
+		runtime.GC()
+		select {
+		case <-finalizerCalled:
+			return // Success
+		case <-time.After(100 * time.Millisecond):
+			// Continue trying
+		}
+	}
+
+	t.Fatal("SequencedTaskRunner with Real ThreadPool was not garbage collected")
 }

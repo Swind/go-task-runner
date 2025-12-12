@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,7 +21,7 @@ type SequencedTaskRunner struct {
 
 	// Metadata
 	name     string
-	metadata map[string]interface{}
+	metadata map[string]any
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -28,7 +29,7 @@ func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
 		threadPool:   threadPool,
 		queue:        NewFIFOTaskQueue(),
 		shutdownChan: make(chan struct{}),
-		metadata:     make(map[string]interface{}),
+		metadata:     make(map[string]any),
 	}
 }
 
@@ -47,15 +48,13 @@ func (r *SequencedTaskRunner) SetName(name string) {
 }
 
 // Metadata returns the metadata associated with the task runner
-func (r *SequencedTaskRunner) Metadata() map[string]interface{} {
+func (r *SequencedTaskRunner) Metadata() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// Return a copy to avoid race conditions
-	result := make(map[string]interface{}, len(r.metadata))
-	for k, v := range r.metadata {
-		result[k] = v
-	}
+	result := make(map[string]any, len(r.metadata))
+	maps.Copy(result, r.metadata)
 	return result
 }
 
@@ -79,7 +78,14 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	if n := atomic.AddInt32(&r.activeRunners, 1); n > 1 {
 		panic(fmt.Sprintf("SequencedTaskRunner: concurrent runLoop detected (count=%d)", n))
 	}
-	defer atomic.AddInt32(&r.activeRunners, -1)
+
+	// Use manual decrement to ensure we can decrement BEFORE setting isRunning=false
+	decrementDone := false
+	defer func() {
+		if !decrementDone {
+			atomic.AddInt32(&r.activeRunners, -1)
+		}
+	}()
 
 	runCtx := context.WithValue(ctx, taskRunnerKey, r)
 
@@ -91,6 +97,9 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 		r.mu.Lock()
 		if r.queue.IsEmpty() {
 			r.isRunning = false
+			// Decrement before unlocking to prevent race with PostTask
+			atomic.AddInt32(&r.activeRunners, -1)
+			decrementDone = true
 			r.mu.Unlock()
 			return
 		}
@@ -101,6 +110,9 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 		if r.queue.IsEmpty() {
 			r.isRunning = false
 			needRepost = false
+			// Decrement before unlocking
+			atomic.AddInt32(&r.activeRunners, -1)
+			decrementDone = true
 		} else {
 			needRepost = true
 		}
@@ -128,6 +140,9 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	if r.queue.IsEmpty() {
 		r.isRunning = false
 		more = false
+		// Decrement before unlocking
+		atomic.AddInt32(&r.activeRunners, -1)
+		decrementDone = true
 	} else {
 		more = true
 	}

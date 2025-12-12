@@ -57,6 +57,8 @@ func (q *FIFOTaskQueue) Pop() (TaskItem, bool) {
 	}
 
 	item := q.tasks[0]
+	// Zero out the element in the underlying array to prevent memory leak
+	q.tasks[0] = TaskItem{}
 	// Optimization: slice slicing
 	q.tasks = q.tasks[1:]
 	q.maybeCompactLocked()
@@ -81,6 +83,11 @@ func (q *FIFOTaskQueue) PopUpTo(max int) []TaskItem {
 
 	batch := make([]TaskItem, max)
 	copy(batch, q.tasks[:max])
+
+	// Zero out the elements in the underlying array to prevent memory leak
+	for i := 0; i < max; i++ {
+		q.tasks[i] = TaskItem{}
+	}
 
 	q.tasks = q.tasks[max:]
 	q.maybeCompactLocked()
