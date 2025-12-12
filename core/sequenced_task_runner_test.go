@@ -1,28 +1,31 @@
-package core
+package core_test
 
 import (
 	"context"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	taskrunner "github.com/Swind/go-task-runner"
+	core "github.com/Swind/go-task-runner/core"
 )
 
 // MockThreadPool implements ThreadPool for testing
 type MockThreadPool struct {
 	postedTasks []struct {
-		Task   Task
-		Traits TaskTraits
+		Task   core.Task
+		Traits core.TaskTraits
 	}
 }
 
-func (m *MockThreadPool) PostInternal(task Task, traits TaskTraits) {
+func (m *MockThreadPool) PostInternal(task core.Task, traits core.TaskTraits) {
 	m.postedTasks = append(m.postedTasks, struct {
-		Task   Task
-		Traits TaskTraits
+		Task   core.Task
+		Traits core.TaskTraits
 	}{task, traits})
 }
 
-func (m *MockThreadPool) PostDelayedInternal(task Task, delay time.Duration, traits TaskTraits, target TaskRunner) {
+func (m *MockThreadPool) PostDelayedInternal(task core.Task, delay time.Duration, traits core.TaskTraits, target core.TaskRunner) {
 	// Not needed for this test yet
 }
 
@@ -38,12 +41,12 @@ func (m *MockThreadPool) DelayedTaskCount() int     { return 0 }
 
 func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
 	mockPool := &MockThreadPool{}
-	runner := NewSequencedTaskRunner(mockPool)
+	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executionOrder []int
 
 	// Helper to create valid task
-	createTask := func(id int) Task {
+	createTask := func(id int) core.Task {
 		return func(ctx context.Context) {
 			executionOrder = append(executionOrder, id)
 		}
@@ -109,7 +112,7 @@ func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
 
 func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
 	mockPool := &MockThreadPool{}
-	runner := NewSequencedTaskRunner(mockPool)
+	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executed atomic.Int32
 	// Task that increments counter
@@ -149,7 +152,7 @@ func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
 
 func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
 	mockPool := &MockThreadPool{}
-	runner := NewSequencedTaskRunner(mockPool)
+	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executed atomic.Int32
 	task1 := func(ctx context.Context) { executed.Add(1) }
@@ -178,7 +181,7 @@ func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
 
 func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T) {
 	mockPool := &MockThreadPool{}
-	runner := NewSequencedTaskRunner(mockPool)
+	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executed atomic.Int32
 	// Task that shuts down runner and then tries to post another task
@@ -206,5 +209,219 @@ func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T)
 
 	if executed.Load() != 1 {
 		t.Fatalf("only the first task should have executed, got %d", executed.Load())
+	}
+}
+
+func TestSequencedTaskRunner_Integration_WithRealThreadPool(t *testing.T) {
+	// Create and start a real GoroutineThreadPool with 2 workers
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Create a SequencedTaskRunner using the real pool
+	runner := core.NewSequencedTaskRunner(pool)
+
+	var executed atomic.Int32
+	task := func(ctx context.Context) { executed.Add(1) }
+
+	// Post several tasks
+	runner.PostTask(task)
+	runner.PostTask(task)
+	runner.PostTask(task)
+
+	// Allow some time for tasks to be processed
+	time.Sleep(100 * time.Millisecond)
+
+	if executed.Load() != 3 {
+		t.Fatalf("expected 3 tasks to have executed, got %d", executed.Load())
+	}
+
+	// Shutdown the runner
+	runner.Shutdown()
+
+	// Attempt to post another task after shutdown
+	runner.PostTask(task)
+
+	// Wait to ensure no new tasks are processed
+	time.Sleep(50 * time.Millisecond)
+
+	if executed.Load() != 3 {
+		t.Fatalf("no tasks should run after shutdown, expected 3, got %d", executed.Load())
+	}
+
+	if !runner.IsClosed() {
+		t.Fatalf("runner should report closed after shutdown")
+	}
+}
+
+func TestSequencedTaskRunner_Integration_WithGlobalThreadPool(t *testing.T) {
+	// Initialize global thread pool with 2 workers
+	taskrunner.InitGlobalThreadPool(2)
+	defer taskrunner.ShutdownGlobalThreadPool()
+
+	// Create a SequencedTaskRunner using the global pool
+	runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
+
+	var executed atomic.Int32
+	// Simple task increments counter
+	task := func(ctx context.Context) { executed.Add(1) }
+
+	// Post a few tasks
+	runner.PostTask(task)
+	runner.PostTask(task)
+	runner.PostTask(task)
+
+	// Allow some time for tasks to be processed
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify that tasks have run (up to 3)
+	if executed.Load() != 3 {
+		t.Fatalf("expected 3 tasks to have executed, got %d", executed.Load())
+	}
+
+	// Shutdown the runner
+	runner.Shutdown()
+
+	// Attempt to post another task after shutdown
+	runner.PostTask(task)
+
+	// Wait a bit to ensure no new tasks are processed
+	time.Sleep(50 * time.Millisecond)
+
+	// Counter should remain at 3
+	if executed.Load() != 3 {
+		t.Fatalf("no tasks should run after shutdown, expected 3, got %d", executed.Load())
+	}
+
+	if !runner.IsClosed() {
+		t.Fatalf("runner should report closed after shutdown")
+	}
+}
+
+func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
+	// 1. Setup real thread pool
+	pool := taskrunner.NewGoroutineThreadPool("wait-idle-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+
+	var counter atomic.Int32
+	taskCount := 10
+
+	// 2. Post tasks
+	for i := 0; i < taskCount; i++ {
+		runner.PostTask(func(ctx context.Context) {
+			time.Sleep(10 * time.Millisecond)
+			counter.Add(1)
+		})
+	}
+
+	// 3. WaitIdle
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := runner.WaitIdle(ctx)
+	if err != nil {
+		t.Fatalf("WaitIdle failed: %v", err)
+	}
+
+	// 4. Verify all tasks executed
+	if count := counter.Load(); int(count) != taskCount {
+		t.Errorf("Expected %d tasks to complete, got %d", taskCount, count)
+	}
+}
+
+func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
+	// 1. Setup real thread pool
+	pool := taskrunner.NewGoroutineThreadPool("flush-async-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+
+	var counter atomic.Int32
+	var flushCalled atomic.Bool
+	taskCount := 10
+
+	// 2. Post tasks
+	for i := 0; i < taskCount; i++ {
+		runner.PostTask(func(ctx context.Context) {
+			time.Sleep(10 * time.Millisecond)
+			counter.Add(1)
+		})
+	}
+
+	// 3. FlushAsync
+	runner.FlushAsync(func() {
+		flushCalled.Store(true)
+		if count := counter.Load(); int(count) != taskCount {
+			t.Errorf("Flush called but not all tasks completed: %d/%d", count, taskCount)
+		}
+	})
+
+	// 4. Wait for flush - FlushAsync is non-blocking, so we sleep a bit or use a channel to wait for callback
+	// Ideally we pass a channel to the flush callback to signal done.
+	done := make(chan struct{})
+	runner.FlushAsync(func() {
+		close(done)
+	})
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Flush callback timed out")
+	}
+
+	if !flushCalled.Load() {
+		t.Error("First Flush callback was not called")
+	}
+}
+
+func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
+	// 1. Setup real thread pool
+	pool := taskrunner.NewGoroutineThreadPool("wait-shutdown-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+
+	var shutdownReceived atomic.Bool
+	var executed atomic.Int32
+
+	// 2. Goroutine waiting for shutdown
+	go func() {
+		err := runner.WaitShutdown(context.Background())
+		if err != nil {
+			t.Errorf("WaitShutdown failed: %v", err)
+		}
+		shutdownReceived.Store(true)
+	}()
+
+	// 3. Post some work
+	runner.PostTask(func(ctx context.Context) {
+		time.Sleep(50 * time.Millisecond)
+		executed.Add(1)
+	})
+
+	// 4. Shutdown after a delay
+	time.Sleep(100 * time.Millisecond)
+	runner.Shutdown()
+
+	// 5. Verify shutdown signal received
+	// Give it a moment to propagate
+	time.Sleep(100 * time.Millisecond)
+
+	if !shutdownReceived.Load() {
+		t.Error("WaitShutdown did not receive shutdown signal")
+	}
+
+	if !runner.IsClosed() {
+		t.Error("Runner should be closed")
+	}
+
+	if executed.Load() != 1 {
+		t.Errorf("Task should have executed, executed count: %d", executed.Load())
 	}
 }
