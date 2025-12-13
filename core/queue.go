@@ -85,7 +85,7 @@ func (q *FIFOTaskQueue) PopUpTo(max int) []TaskItem {
 	copy(batch, q.tasks[:max])
 
 	// Zero out the elements in the underlying array to prevent memory leak
-	for i := 0; i < max; i++ {
+	for i := range max {
 		q.tasks[i] = TaskItem{}
 	}
 
@@ -116,13 +116,7 @@ func (q *FIFOTaskQueue) maybeCompactLocked() {
 		return
 	}
 
-	newCap := c / 2
-	if newCap < defaultQueueCap {
-		newCap = defaultQueueCap
-	}
-	if newCap < n {
-		newCap = n
-	}
+	newCap := max(max(c/2, defaultQueueCap), n)
 
 	newSlice := make([]TaskItem, n, newCap)
 	copy(newSlice, q.tasks)

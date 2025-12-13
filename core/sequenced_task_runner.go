@@ -10,18 +10,18 @@ import (
 )
 
 type SequencedTaskRunner struct {
-	threadPool    ThreadPool
-	queue         TaskQueue
-	mu            sync.Mutex
-	isRunning     bool
-	activeRunners int32       // atomic guard for concurrency assertion
-	closed        atomic.Bool // indicates if the runner is closed
-	shutdownChan  chan struct{}
-	shutdownOnce  sync.Once
+	threadPool   ThreadPool
+	queue        TaskQueue
+	queueMu      sync.Mutex  // Protects queue operations
+	runningCount int32       // atomic: 0 (idle) or 1 (running/scheduled)
+	closed       atomic.Bool // indicates if the runner is closed
+	shutdownChan chan struct{}
+	shutdownOnce sync.Once
 
 	// Metadata
-	name     string
-	metadata map[string]any
+	name       string
+	metadata   map[string]any
+	metadataMu sync.Mutex // Protects name and metadata
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -33,24 +33,28 @@ func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
 	}
 }
 
+// =============================================================================
+// Metadata Methods
+// =============================================================================
+
 // Name returns the name of the task runner
 func (r *SequencedTaskRunner) Name() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
 	return r.name
 }
 
 // SetName sets the name of the task runner
 func (r *SequencedTaskRunner) SetName(name string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
 	r.name = name
 }
 
 // Metadata returns the metadata associated with the task runner
 func (r *SequencedTaskRunner) Metadata() map[string]any {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
 
 	// Return a copy to avoid race conditions
 	result := make(map[string]any, len(r.metadata))
@@ -60,129 +64,138 @@ func (r *SequencedTaskRunner) Metadata() map[string]any {
 
 // SetMetadata sets a metadata key-value pair
 func (r *SequencedTaskRunner) SetMetadata(key string, value interface{}) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
 	r.metadata[key] = value
 }
 
-func (r *SequencedTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
-	r.threadPool.PostDelayedInternal(task, delay, traits, r)
-}
+// =============================================================================
+// Core Task Execution
+// =============================================================================
 
-func (r *SequencedTaskRunner) PostDelayedTask(task Task, delay time.Duration) {
-	r.PostDelayedTaskWithTraits(task, delay, DefaultTaskTraits())
-}
-
-func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
-	// Assertion: Ensure strictly one goroutine at a time
-	if n := atomic.AddInt32(&r.activeRunners, 1); n > 1 {
-		panic(fmt.Sprintf("SequencedTaskRunner: concurrent runLoop detected (count=%d)", n))
+// ensureRunning ensures there is a runLoop running.
+// If no runLoop is currently running or scheduled, it starts one.
+// This method is safe to call concurrently from multiple goroutines.
+func (r *SequencedTaskRunner) ensureRunning(traits TaskTraits) {
+	// CAS: Only start runLoop if runningCount is 0 (idle)
+	// If runningCount is already 1, a runLoop is running/scheduled, so we don't need to start another
+	if atomic.CompareAndSwapInt32(&r.runningCount, 0, 1) {
+		r.threadPool.PostInternal(r.runLoop, traits)
 	}
+}
 
-	// Use manual decrement to ensure we can decrement BEFORE setting isRunning=false
-	decrementDone := false
-	defer func() {
-		if !decrementDone {
-			atomic.AddInt32(&r.activeRunners, -1)
-		}
-	}()
+// runLoop processes exactly one task, then either:
+// - Posts itself again if there are more tasks (yields to scheduler between tasks)
+// - Sets runningCount to 0 if no more tasks
+//
+// This design ensures:
+// 1. Only one runLoop is active at a time (protected by runningCount CAS)
+// 2. Each task gets a chance to be re-prioritized by the scheduler
+// 3. High-priority tasks can interleave with sequences
+func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
+	// Sanity check: runningCount should be 1 when runLoop executes
+	if atomic.LoadInt32(&r.runningCount) != 1 {
+		panic(fmt.Sprintf("SequencedTaskRunner: runLoop started with runningCount=%d (expected 1)",
+			atomic.LoadInt32(&r.runningCount)))
+	}
 
 	runCtx := context.WithValue(ctx, taskRunnerKey, r)
 
-	// 1. Fetch SINGLE task
-	item, ok := r.queue.Pop() // Changed from PopUpTo
+	// 1. Fetch one task
+	r.queueMu.Lock()
+	item, ok := r.queue.Pop()
+	r.queueMu.Unlock()
 
 	if !ok {
-		// Queue completely empty
-		r.mu.Lock()
-		if r.queue.IsEmpty() {
-			r.isRunning = false
-			// Decrement before unlocking to prevent race with PostTask
-			atomic.AddInt32(&r.activeRunners, -1)
-			decrementDone = true
-			r.mu.Unlock()
-			return
-		}
-		r.mu.Unlock()
+		// Queue is empty, prepare to go idle
+		atomic.StoreInt32(&r.runningCount, 0)
 
-		var needRepost bool
-		r.mu.Lock()
-		if r.queue.IsEmpty() {
-			r.isRunning = false
-			needRepost = false
-			// Decrement before unlocking
-			atomic.AddInt32(&r.activeRunners, -1)
-			decrementDone = true
-		} else {
-			needRepost = true
+		// Double-check: a task might have been posted after Pop but before Store
+		r.queueMu.Lock()
+		hasMore := !r.queue.IsEmpty()
+		var nextTraits TaskTraits
+		if hasMore {
+			nextTraits, _ = r.queue.PeekTraits()
 		}
-		r.mu.Unlock()
+		r.queueMu.Unlock()
 
-		if needRepost {
-			nextTraits, _ := r.queue.PeekTraits() // Best effort peek
-			r.rePostSelf(nextTraits)
+		if hasMore {
+			// New task arrived, ensure a runLoop is running
+			// This will CAS(0, 1) and start a new runLoop
+			r.ensureRunning(nextTraits)
 		}
 		return
 	}
 
-	// 2. Execute ONE task
+	// 2. Execute the task
 	func() {
-		defer func() { recover() }()
+		defer func() {
+			if rec := recover(); rec != nil {
+				// Task panicked, but we continue processing
+				// (repeating tasks and PostTaskAndReply have their own panic handling)
+				_ = rec
+			}
+		}()
 		item.Task(runCtx)
 	}()
 
-	// 3. Always repost if there are more tasks (Yield)
-	// This ensures we yield to the Scheduler between every task
+	// 3. Check if there are more tasks
+	r.queueMu.Lock()
+	hasMore := !r.queue.IsEmpty()
 	var nextTraits TaskTraits
-	var more bool
-
-	r.mu.Lock()
-	if r.queue.IsEmpty() {
-		r.isRunning = false
-		more = false
-		// Decrement before unlocking
-		atomic.AddInt32(&r.activeRunners, -1)
-		decrementDone = true
-	} else {
-		more = true
-	}
-	r.mu.Unlock()
-
-	if more {
+	if hasMore {
 		nextTraits, _ = r.queue.PeekTraits()
-		r.rePostSelf(nextTraits)
 	}
-}
+	r.queueMu.Unlock()
 
-// scheduleRunLoop starts runLoop (if not already running)
-func (r *SequencedTaskRunner) scheduleRunLoop(traits TaskTraits) {
-	r.mu.Lock()
-	if !r.isRunning {
-		r.isRunning = true
-		r.mu.Unlock()
-		r.threadPool.PostInternal(r.runLoop, traits)
+	if hasMore {
+		// More tasks to process, directly post next runLoop
+		// runningCount stays at 1 (we're passing the "running" state to the next runLoop)
+		r.threadPool.PostInternal(r.runLoop, nextTraits)
 	} else {
-		r.mu.Unlock()
+		// No more tasks, go idle
+		atomic.StoreInt32(&r.runningCount, 0)
+
+		// Double-check again: a task might have been posted during the check
+		r.queueMu.Lock()
+		hasMore = !r.queue.IsEmpty()
+		if hasMore {
+			nextTraits, _ = r.queue.PeekTraits()
+		}
+		r.queueMu.Unlock()
+
+		if hasMore {
+			r.ensureRunning(nextTraits)
+		}
 	}
 }
 
-// rePostSelf re-submits runLoop to Scheduler (for Yield)
-func (r *SequencedTaskRunner) rePostSelf(traits TaskTraits) {
-	r.threadPool.PostInternal(r.runLoop, traits)
-}
-
-// PostTask submits task (using default Traits)
+// PostTask submits a task with default traits
 func (r *SequencedTaskRunner) PostTask(task Task) {
 	r.PostTaskWithTraits(task, DefaultTaskTraits())
 }
 
-// PostTaskWithTraits submits task with traits
+// PostTaskWithTraits submits a task with specified traits
 func (r *SequencedTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 	if r.closed.Load() {
 		return
 	}
+
+	r.queueMu.Lock()
 	r.queue.Push(task, traits)
-	r.scheduleRunLoop(traits)
+	r.queueMu.Unlock()
+
+	r.ensureRunning(traits)
+}
+
+// PostDelayedTask submits a task to execute after a delay
+func (r *SequencedTaskRunner) PostDelayedTask(task Task, delay time.Duration) {
+	r.PostDelayedTaskWithTraits(task, delay, DefaultTaskTraits())
+}
+
+// PostDelayedTaskWithTraits submits a delayed task with specified traits
+func (r *SequencedTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
+	r.threadPool.PostDelayedInternal(task, delay, traits, r)
 }
 
 // =============================================================================
@@ -287,7 +300,7 @@ func (r *SequencedTaskRunner) PostRepeatingTaskWithInitialDelay(
 // 4. Signaling all WaitShutdown() waiters
 //
 // Note: This method is non-blocking and can be safely called from within a task.
-// Note: This will not interrupt currently currently executing tasks.
+// Note: This will not interrupt currently executing tasks.
 func (r *SequencedTaskRunner) Shutdown() {
 	r.shutdownOnce.Do(func() {
 		// Mark as closed
@@ -296,10 +309,9 @@ func (r *SequencedTaskRunner) Shutdown() {
 		close(r.shutdownChan)
 
 		// Clear the queue
-		r.mu.Lock()
+		r.queueMu.Lock()
 		r.queue = NewFIFOTaskQueue()
-		r.isRunning = false
-		r.mu.Unlock()
+		r.queueMu.Unlock()
 	})
 }
 
