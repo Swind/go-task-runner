@@ -59,6 +59,10 @@ func (tg *GoroutineThreadPool) Start(ctx context.Context) {
 
 // Stop stops the thread pool
 func (tg *GoroutineThreadPool) Stop() {
+	// Always shutdown scheduler to clean up resources (queue, delayed tasks)
+	// even if pool was never started
+	tg.scheduler.Shutdown()
+
 	tg.runningMu.Lock()
 	if !tg.running {
 		tg.runningMu.Unlock()
@@ -66,8 +70,6 @@ func (tg *GoroutineThreadPool) Stop() {
 	}
 	tg.runningMu.Unlock()
 
-	// Shutdown scheduler to stop accepting new tasks
-	tg.scheduler.Shutdown()
 	if tg.cancel != nil {
 		tg.cancel()
 	}

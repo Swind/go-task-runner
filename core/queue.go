@@ -25,6 +25,7 @@ type TaskQueue interface {
 	Len() int
 	IsEmpty() bool
 	MaybeCompact()
+	Clear() // Clear all tasks from the queue
 }
 
 // =============================================================================
@@ -140,6 +141,14 @@ func (q *FIFOTaskQueue) Len() int {
 
 func (q *FIFOTaskQueue) IsEmpty() bool {
 	return q.Len() == 0
+}
+
+// Clear removes all tasks from the queue and releases references
+func (q *FIFOTaskQueue) Clear() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	// Create a new slice to release all task references
+	q.tasks = make([]TaskItem, 0, defaultQueueCap)
 }
 
 // =============================================================================
@@ -278,4 +287,14 @@ func (q *PriorityTaskQueue) MaybeCompact() {
 	// For standard slice based heap, standard append/slice mechanics apply.
 	// But resetting capacity for heap is tricky without rebuilding.
 	// Ignoring compaction for heap in this version as it's less critical given container/heap usage patterns.
+}
+
+// Clear removes all tasks from the queue and releases references
+func (q *PriorityTaskQueue) Clear() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	// Create a new heap to release all task references
+	q.pq = make(priorityHeap, 0, defaultQueueCap)
+	heap.Init(&q.pq)
+	q.nextSequence = 0
 }

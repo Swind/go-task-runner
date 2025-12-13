@@ -137,6 +137,12 @@ func (dm *DelayManager) loop() {
 
 func (dm *DelayManager) Stop() {
 	dm.cancel()
+
+	// Clear pq to release all TaskRunner references
+	dm.mu.Lock()
+	dm.pq = make(DelayedTaskHeap, 0)
+	heap.Init(&dm.pq)
+	dm.mu.Unlock()
 }
 
 func (dm *DelayManager) TaskCount() int {

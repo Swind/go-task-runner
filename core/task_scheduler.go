@@ -95,6 +95,9 @@ func (s *TaskScheduler) Shutdown() {
 
 	// 2. Stop DelayManager (no more new tasks generated)
 	s.delayManager.Stop()
+
+	// 3. Clear queue to release all task references (including runLoop bound methods)
+	s.queue.Clear()
 }
 
 // Metrics
