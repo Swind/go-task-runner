@@ -639,3 +639,81 @@ func TestSequencedTaskRunner_GC_WithGlobalThreadPool(t *testing.T) {
 		t.Error("Timeout: SequencedTaskRunner from Global Pool was not GC'd")
 	}
 }
+
+// TestSequencedTaskRunner_GC_TaskAndReplyWithResult verifies that objects
+// captured in PostTaskAndReplyWithResult can be GC'd after completion.
+func TestSequencedTaskRunner_GC_TaskAndReplyWithResult(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	bgRunner := core.NewSequencedTaskRunner(pool)
+	uiRunner := core.NewSequencedTaskRunner(pool)
+
+	var finalizerCalled atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Create scope for object
+	func() {
+		obj := &TestObject{
+			ID:   "task-reply-result-obj",
+			Data: make([]byte, 50*1024), // 50KB
+		}
+
+		runtime.SetFinalizer(obj, func(o *TestObject) {
+			finalizerCalled.Store(true)
+			wg.Done()
+		})
+
+		// Use object in task and reply
+		done := make(chan struct{})
+
+		core.PostTaskAndReplyWithResult(
+			bgRunner,
+			func(ctx context.Context) (string, error) {
+				// Use object in background task
+				return obj.ID, nil
+			},
+			func(ctx context.Context, result string, err error) {
+				// Use result in reply
+				if result != "task-reply-result-obj" {
+					// Just to ensure we used the result
+				}
+				close(done)
+			},
+			uiRunner,
+		)
+
+		// Wait for task and reply to complete
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timeout waiting for task and reply")
+		}
+
+		// obj goes out of scope here
+	}()
+
+	// Force GC
+	for i := 0; i < 5; i++ {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for finalizer
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if !finalizerCalled.Load() {
+			t.Error("Object in PostTaskAndReplyWithResult was not GC'd")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Timeout: object in PostTaskAndReplyWithResult was not GC'd")
+	}
+}
