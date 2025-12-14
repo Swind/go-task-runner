@@ -575,3 +575,67 @@ func (o *TestObject) Process(ctx context.Context) {
 	_ = o.ID
 	_ = len(o.Data)
 }
+
+// TestSequencedTaskRunner_GC_WithGlobalThreadPool verifies that a SequencedTaskRunner
+// created from the global thread pool can be GC'd after it is shutdown, even if
+// the global thread pool remains active.
+func TestSequencedTaskRunner_GC_WithGlobalThreadPool(t *testing.T) {
+	// Initialize global thread pool
+	taskrunner.InitGlobalThreadPool(2)
+	// Ensure we shut it down at the end, but the test focuses on the runner GC
+	// while the pool is still alive (or at least before this defer runs).
+	defer taskrunner.ShutdownGlobalThreadPool()
+
+	var finalizerCalled atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Create scope for runner
+	func() {
+		// Create a runner using the global pool
+		runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
+
+		runtime.SetFinalizer(runner, func(r *core.SequencedTaskRunner) {
+			finalizerCalled.Store(true)
+			wg.Done()
+		})
+
+		// Post and execute a task to make sure it's active
+		done := make(chan struct{})
+		runner.PostTask(func(ctx context.Context) {
+			close(done)
+		})
+
+		<-done
+
+		// Shutdown the runner. This is crucial.
+		// If we don't shutdown, the runner might still be referenced by the pool
+		// or have pending operations (though here it's idle).
+		// Explicit shutdown should detach it from the pool's scheduling if implemented correctly.
+		runner.Shutdown()
+
+		// runner goes out of scope here
+	}()
+
+	// Force GC
+	for i := 0; i < 5; i++ {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for finalizer
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if !finalizerCalled.Load() {
+			t.Error("SequencedTaskRunner from Global Pool was not GC'd")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Timeout: SequencedTaskRunner from Global Pool was not GC'd")
+	}
+}
