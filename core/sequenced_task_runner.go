@@ -69,6 +69,11 @@ func (r *SequencedTaskRunner) SetMetadata(key string, value interface{}) {
 	r.metadata[key] = value
 }
 
+// GetThreadPool returns the underlying ThreadPool used by this runner
+func (r *SequencedTaskRunner) GetThreadPool() ThreadPool {
+	return r.threadPool
+}
+
 // =============================================================================
 // Core Task Execution
 // =============================================================================

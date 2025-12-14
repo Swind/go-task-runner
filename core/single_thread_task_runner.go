@@ -93,6 +93,11 @@ func (r *SingleThreadTaskRunner) SetMetadata(key string, value interface{}) {
 	r.metadata[key] = value
 }
 
+// GetThreadPool returns nil because SingleThreadTaskRunner doesn't use a thread pool
+func (r *SingleThreadTaskRunner) GetThreadPool() ThreadPool {
+	return nil
+}
+
 // PostTask submits a task for execution
 func (r *SingleThreadTaskRunner) PostTask(task Task) {
 	r.PostTaskWithTraits(task, DefaultTaskTraits())

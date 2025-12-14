@@ -231,3 +231,4 @@ func (m *MockTaskRunner) Shutdown()                              {}
 func (m *MockTaskRunner) IsClosed() bool                         { return false }
 func (m *MockTaskRunner) Name() string                           { return "MockTaskRunner" }
 func (m *MockTaskRunner) Metadata() map[string]interface{}       { return nil }
+func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }

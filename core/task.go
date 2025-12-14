@@ -94,7 +94,12 @@ type TaskRunner interface {
 	// Name returns the name of the task runner
 	Name() string
 	// Metadata returns the metadata associated with the task runner
-	Metadata() map[string]interface{}
+	Metadata() map[string]any
+
+	// [v2.6 New] Thread Pool Access
+	// GetThreadPool returns the underlying ThreadPool used by this runner
+	// Returns nil for runners that don't use a thread pool (e.g., SingleThreadTaskRunner)
+	GetThreadPool() ThreadPool
 }
 
 // =============================================================================
