@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"log"
 	"maps"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -138,7 +140,8 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 			if rec := recover(); rec != nil {
 				// Task panicked, but we continue processing
 				// (repeating tasks and PostTaskAndReply have their own panic handling)
-				_ = rec
+				log.Printf("[SequencedTaskRunner] Task panic recovered: %v\nStack trace:\n%s",
+					rec, debug.Stack())
 			}
 		}()
 		item.Task(runCtx)
