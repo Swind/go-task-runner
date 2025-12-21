@@ -106,3 +106,14 @@ func TestGetThreadPool_GlobalPool(t *testing.T) {
 
 	t.Logf("✓ Multiple runners successfully sharing global pool: %s", globalPool.ID())
 }
+
+// Additional test: Create runner via taskrunner.CreateTaskRunner and verify GetThreadPool matches global
+func TestGetThreadPool_CreateTaskRunner(t *testing.T) {
+	taskrunner.InitGlobalThreadPool(3)
+	defer taskrunner.ShutdownGlobalThreadPool()
+
+	runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
+	if got := runner.GetThreadPool(); got != taskrunner.GetGlobalThreadPool() {
+		t.Error("CreateTaskRunner GetThreadPool does not match global pool")
+	}
+}
