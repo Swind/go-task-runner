@@ -192,8 +192,9 @@ func (m *JobManager) submitJobControl(
 	}
 	handler := rawHandler.(RawJobHandler)
 
-	// 3. Create context and add to activeJobs (fast memory operation)
-	jobCtx, cancel := context.WithCancel(context.Background())
+	// 3. Create context derived from parent and add to activeJobs
+	// When parent context is cancelled, jobCtx will also be cancelled
+	jobCtx, cancel := context.WithCancel(ctx)
 	info := &activeJobInfo{
 		cancel:    cancel,
 		jobEntity: entity,

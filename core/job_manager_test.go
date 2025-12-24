@@ -1000,3 +1000,131 @@ func TestRetryPolicy_NoRetry(t *testing.T) {
 		t.Errorf("Expected MaxRetries=0, got %d", policy.MaxRetries)
 	}
 }
+
+// =============================================================================
+// Context Propagation Tests
+// =============================================================================
+
+func TestJobManager_ContextPropagation_ParentCancelsJob(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	// Handler that respects context cancellation
+	executionStarted := make(chan struct{})
+	executionEnded := make(chan struct{})
+	handler := func(ctx context.Context, args EmailArgs) error {
+		close(executionStarted)
+		// Wait for context cancellation
+		<-ctx.Done()
+		close(executionEnded)
+		return ctx.Err()
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+
+	// Create a cancellable parent context
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+
+	// Submit job with parent context
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(parentCtx, "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for job to start executing
+	select {
+	case <-executionStarted:
+		// Job started
+	case <-time.After(1 * time.Second):
+		t.Fatal("Job did not start within timeout")
+	}
+
+	// Cancel the parent context
+	parentCancel()
+
+	// Wait for job to be cancelled
+	select {
+	case <-executionEnded:
+		// Job was cancelled by parent context
+	case <-time.After(1 * time.Second):
+		t.Fatal("Job was not cancelled when parent context was cancelled")
+	}
+
+	// Verify job status is CANCELED
+	time.Sleep(100 * time.Millisecond) // Give time for status update
+	job, err := manager.GetJob(context.Background(), "job1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusCanceled {
+		t.Errorf("Expected status CANCELED, got %s", job.Status)
+	}
+}
+
+func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	// Handler that takes longer than parent timeout
+	executionStarted := make(chan struct{})
+	executionEnded := make(chan struct{})
+	handler := func(ctx context.Context, args EmailArgs) error {
+		close(executionStarted)
+		// Simulate long-running task
+		select {
+		case <-time.After(5 * time.Second):
+			return nil
+		case <-ctx.Done():
+			close(executionEnded)
+			return ctx.Err()
+		}
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+
+	// Create parent context with short timeout
+	parentCtx, parentCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer parentCancel()
+
+	// Submit job with parent context
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(parentCtx, "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for job to start executing
+	select {
+	case <-executionStarted:
+		// Job started
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Job did not start within timeout")
+	}
+
+	// Wait for job to be cancelled by timeout
+	select {
+	case <-executionEnded:
+		// Job was cancelled by parent timeout
+	case <-time.After(1 * time.Second):
+		t.Fatal("Job was not cancelled when parent context timed out")
+	}
+
+	// Verify job status is CANCELED
+	time.Sleep(100 * time.Millisecond)
+	job, err := manager.GetJob(context.Background(), "job1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusCanceled {
+		t.Errorf("Expected status CANCELED, got %s", job.Status)
+	}
+}
