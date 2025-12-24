@@ -35,10 +35,6 @@ type JobManager struct {
 	handlers   sync.Map // map[string]RawJobHandler
 	activeJobs sync.Map // map[string]*activeJobInfo
 
-	// activeJobsMu protects the check-and-add operation for duplicate prevention
-	// This ensures atomic "check if exists + add" semantics
-	activeJobsMu sync.Mutex
-
 	store      JobStore
 	serializer JobSerializer
 
@@ -159,6 +155,7 @@ func (m *JobManager) SubmitDelayedJob(
 		return err
 	}
 
+	// Capture all data for the task
 	entity := &JobEntity{
 		ID:        id,
 		Type:      jobType,
@@ -168,33 +165,40 @@ func (m *JobManager) SubmitDelayedJob(
 		CreatedAt: time.Now(),
 	}
 
-	// Layer 1: Fast control logic
-	errChan := make(chan error, 1)
-	m.controlRunner.PostTask(func(_ context.Context) {
-		errChan <- m.submitJobControl(ctx, entity, traits, delay)
-	})
+	// Capture parent context for closure
+	// Note: PostTask's ctx parameter is the runLoop's context, not the parent context
+	// We need to capture the parent context separately to pass it to submitJobControl
+	parentCtx := ctx
 
-	return <-errChan
+	// Submit to controlRunner and wait for result
+	// By running the entire submit logic on controlRunner, we ensure
+	// sequential execution and atomic check-and-add without needing a mutex
+	resultChan := make(chan error, 1)
+	m.controlRunner.PostTask(func(_ context.Context) {
+		resultChan <- m.submitJobControl(parentCtx, entity, traits, delay)
+	})
+	return <-resultChan
 }
 
 // submitJobControl: Layer 1 - Fast validation and scheduling
+// This runs on controlRunner, which ensures sequential execution.
+// The sequential execution guarantees atomic check-and-add without needing a mutex.
 func (m *JobManager) submitJobControl(
 	ctx context.Context,
 	entity *JobEntity,
 	traits TaskTraits,
 	delay time.Duration,
 ) error {
-	// 1. Fast duplicate check (memory only) - protected by mutex for atomic check-and-add
-	m.activeJobsMu.Lock()
+	// 1. Fast duplicate check (memory only)
+	// Since this runs sequentially on controlRunner, by the time we check activeJobs
+	// and add to it, no other submitJobControl can be running concurrently
 	if _, exists := m.activeJobs.Load(entity.ID); exists {
-		m.activeJobsMu.Unlock()
 		return fmt.Errorf("job %s is already active", entity.ID)
 	}
 
 	// 2. Get handler (fast memory lookup)
 	rawHandler, ok := m.handlers.Load(entity.Type)
 	if !ok {
-		m.activeJobsMu.Unlock()
 		return fmt.Errorf("handler for job type %s not found", entity.Type)
 	}
 	handler := rawHandler.(RawJobHandler)
@@ -208,7 +212,6 @@ func (m *JobManager) submitJobControl(
 		startTime: time.Now(),
 	}
 	m.activeJobs.Store(entity.ID, info)
-	m.activeJobsMu.Unlock()
 
 	// 4. Delegate to Layer 2 (IO operations)
 	m.submitJobIO(ctx, entity, jobCtx, handler, traits, delay, info)
