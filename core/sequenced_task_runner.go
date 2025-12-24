@@ -91,6 +91,27 @@ func (r *SequencedTaskRunner) ensureRunning(traits TaskTraits) {
 	}
 }
 
+// scheduleNextIfNeeded checks if there are more tasks and schedules a runLoop if needed.
+// This is used after setting runningCount to 0 to handle the race condition where
+// a new task arrives between checking the queue and setting runningCount to 0.
+//
+// Returns true if a runLoop was scheduled, false otherwise.
+func (r *SequencedTaskRunner) scheduleNextIfNeeded() bool {
+	r.queueMu.Lock()
+	hasMore := !r.queue.IsEmpty()
+	var nextTraits TaskTraits
+	if hasMore {
+		nextTraits, _ = r.queue.PeekTraits()
+	}
+	r.queueMu.Unlock()
+
+	if hasMore {
+		r.ensureRunning(nextTraits)
+		return true
+	}
+	return false
+}
+
 // runLoop processes exactly one task, then either:
 // - Posts itself again if there are more tasks (yields to scheduler between tasks)
 // - Sets runningCount to 0 if no more tasks
@@ -114,23 +135,10 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	r.queueMu.Unlock()
 
 	if !ok {
-		// Queue is empty, prepare to go idle
+		// Queue is empty, go idle
 		atomic.StoreInt32(&r.runningCount, 0)
-
 		// Double-check: a task might have been posted after Pop but before Store
-		r.queueMu.Lock()
-		hasMore := !r.queue.IsEmpty()
-		var nextTraits TaskTraits
-		if hasMore {
-			nextTraits, _ = r.queue.PeekTraits()
-		}
-		r.queueMu.Unlock()
-
-		if hasMore {
-			// New task arrived, ensure a runLoop is running
-			// This will CAS(0, 1) and start a new runLoop
-			r.ensureRunning(nextTraits)
-		}
+		r.scheduleNextIfNeeded()
 		return
 	}
 
@@ -163,18 +171,8 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	} else {
 		// No more tasks, go idle
 		atomic.StoreInt32(&r.runningCount, 0)
-
-		// Double-check again: a task might have been posted during the check
-		r.queueMu.Lock()
-		hasMore = !r.queue.IsEmpty()
-		if hasMore {
-			nextTraits, _ = r.queue.PeekTraits()
-		}
-		r.queueMu.Unlock()
-
-		if hasMore {
-			r.ensureRunning(nextTraits)
-		}
+		// Double-check: a task might have been posted during the check
+		r.scheduleNextIfNeeded()
 	}
 }
 
