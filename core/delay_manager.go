@@ -97,25 +97,12 @@ func (dm *DelayManager) loop() {
 	timer.Stop()
 
 	for {
-		var now time.Time
-		var nextRun time.Duration
-
-		dm.mu.Lock()
-		if item := dm.pq.Peek(); item == nil {
+		// Calculate next run time
+		nextRun := dm.calculateNextRun()
+		if nextRun == 0 {
+			// No tasks, wait indefinitely
 			nextRun = 1000 * time.Hour
-		} else {
-			now = time.Now()
-			if item.RunAt.Before(now) {
-				heap.Pop(&dm.pq)
-				dm.mu.Unlock()
-
-				item.Target.PostTaskWithTraits(item.Task, item.Traits)
-				continue
-			} else {
-				nextRun = item.RunAt.Sub(now)
-			}
 		}
-		dm.mu.Unlock()
 
 		timer.Reset(nextRun)
 
@@ -124,7 +111,10 @@ func (dm *DelayManager) loop() {
 			timer.Stop()
 			return
 		case <-timer.C:
+			// Timer fired, process all expired tasks in one go
+			dm.processExpiredTasks()
 		case <-dm.wakeup:
+			// New task added, need to recalculate
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -132,6 +122,50 @@ func (dm *DelayManager) loop() {
 				}
 			}
 		}
+	}
+}
+
+// calculateNextRun determines how long to wait until the next task
+// Returns 0 if there are tasks that should run immediately
+func (dm *DelayManager) calculateNextRun() time.Duration {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	item := dm.pq.Peek()
+	if item == nil {
+		return 0 // No tasks
+	}
+
+	now := time.Now()
+	if item.RunAt.Before(now) {
+		return 0 // Already expired
+	}
+	return item.RunAt.Sub(now)
+}
+
+// processExpiredTasks processes all tasks that have expired
+// This is more efficient than processing one at a time with continue
+func (dm *DelayManager) processExpiredTasks() {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	now := time.Now()
+	// Collect all expired tasks to avoid holding lock while posting
+	var expired []*DelayedTask
+
+	for dm.pq.Len() > 0 {
+		item := dm.pq.Peek()
+		if item.RunAt.After(now) {
+			break // No more expired tasks
+		}
+		// Task has expired
+		heap.Pop(&dm.pq)
+		expired = append(expired, item)
+	}
+
+	// Post expired tasks outside the lock
+	for _, item := range expired {
+		item.Target.PostTaskWithTraits(item.Task, item.Traits)
 	}
 }
 
