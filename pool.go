@@ -80,6 +80,46 @@ func (tg *GoroutineThreadPool) Stop() {
 	tg.runningMu.Unlock()
 }
 
+// StopGraceful stops the thread pool gracefully, waiting for queued tasks to complete
+// Returns error if timeout is exceeded before tasks complete
+func (tg *GoroutineThreadPool) StopGraceful(timeout time.Duration) error {
+	tg.runningMu.Lock()
+	if !tg.running {
+		// Not running, nothing to do
+		tg.runningMu.Unlock()
+		return nil
+	}
+	tg.runningMu.Unlock()
+
+	// First, gracefully shutdown the scheduler (waits for queues to drain)
+	if err := tg.scheduler.ShutdownGraceful(timeout); err != nil {
+		// Timeout occurred, but we still need to cancel workers
+		if tg.cancel != nil {
+			tg.cancel()
+		}
+		tg.Join()
+
+		// Set running to false even on timeout path
+		tg.runningMu.Lock()
+		tg.running = false
+		tg.runningMu.Unlock()
+
+		return err
+	}
+
+	// Scheduler drained successfully, now cancel workers
+	if tg.cancel != nil {
+		tg.cancel()
+	}
+	tg.Join()
+
+	tg.runningMu.Lock()
+	tg.running = false
+	tg.runningMu.Unlock()
+
+	return nil
+}
+
 // ID returns the ID of the thread pool
 func (tg *GoroutineThreadPool) ID() string {
 	return tg.id

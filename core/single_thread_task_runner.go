@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+// QueuePolicy defines how to handle full queue situations
+type QueuePolicy int
+
+const (
+	// QueuePolicyDrop: Silently drop tasks when queue is full (current behavior)
+	QueuePolicyDrop QueuePolicy = iota
+
+	// QueuePolicyReject: Call rejection callback when queue is full
+	QueuePolicyReject
+
+	// QueuePolicyWait: Block until queue has space or context is done
+	QueuePolicyWait
+)
+
+// RejectionCallback is called when a task is rejected (QueuePolicyReject mode)
+type RejectionCallback func(task Task, traits TaskTraits)
+
 // SingleThreadTaskRunner binds a dedicated Goroutine to execute tasks sequentially.
 // It guarantees that all tasks submitted to it run on the same Goroutine (Thread Affinity).
 //
@@ -22,6 +39,12 @@ import (
 type SingleThreadTaskRunner struct {
 	// Task queue: Buffered channel for tasks
 	workQueue chan Task
+
+	// Queue policy for handling full queue
+	queuePolicyMu    sync.RWMutex
+	queuePolicy      QueuePolicy
+	rejectionCallback RejectionCallback
+	rejectedCount    atomic.Int64
 
 	// Lifecycle control
 	ctx    context.Context
@@ -51,6 +74,7 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 		stopped:      make(chan struct{}),
 		shutdownChan: make(chan struct{}),
 		metadata:     make(map[string]interface{}),
+		queuePolicy:  QueuePolicyDrop, // Default: drop tasks when queue is full
 	}
 
 	// Start the dedicated message loop
@@ -98,24 +122,100 @@ func (r *SingleThreadTaskRunner) GetThreadPool() ThreadPool {
 	return nil
 }
 
+// =============================================================================
+// Queue Policy Configuration
+// =============================================================================
+
+// SetQueuePolicy sets the policy for handling full queue situations
+func (r *SingleThreadTaskRunner) SetQueuePolicy(policy QueuePolicy) {
+	r.queuePolicyMu.Lock()
+	defer r.queuePolicyMu.Unlock()
+	r.queuePolicy = policy
+}
+
+// GetQueuePolicy returns the current queue policy
+func (r *SingleThreadTaskRunner) GetQueuePolicy() QueuePolicy {
+	r.queuePolicyMu.RLock()
+	defer r.queuePolicyMu.RUnlock()
+	return r.queuePolicy
+}
+
+// SetRejectionCallback sets the callback to be called when a task is rejected
+// Only used when QueuePolicy is set to QueuePolicyReject
+func (r *SingleThreadTaskRunner) SetRejectionCallback(callback RejectionCallback) {
+	r.queuePolicyMu.Lock()
+	defer r.queuePolicyMu.Unlock()
+	r.rejectionCallback = callback
+}
+
+// RejectedCount returns the number of tasks that have been rejected due to full queue
+// Only incremented when QueuePolicy is QueuePolicyReject
+func (r *SingleThreadTaskRunner) RejectedCount() int64 {
+	return r.rejectedCount.Load()
+}
+
 // PostTask submits a task for execution
 func (r *SingleThreadTaskRunner) PostTask(task Task) {
 	r.PostTaskWithTraits(task, DefaultTaskTraits())
 }
 
 // PostTaskWithTraits submits a task with traits (traits are ignored for single-threaded execution)
+// The behavior when the queue is full depends on the configured QueuePolicy:
+// - QueuePolicyDrop: Silently drops the task (default)
+// - QueuePolicyReject: Calls the rejection callback if set
+// - QueuePolicyWait: Blocks until queue has space or context is done
 func (r *SingleThreadTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 	// Check if runner is closed to avoid panic on closed channel
 	if r.closed.Load() {
 		return
 	}
 
-	select {
-	case <-r.ctx.Done():
-		// Runner stopped, drop task
-		return
-	case r.workQueue <- task:
-		// Successfully queued
+	r.queuePolicyMu.RLock()
+	policy := r.queuePolicy
+	callback := r.rejectionCallback
+	r.queuePolicyMu.RUnlock()
+
+	switch policy {
+	case QueuePolicyDrop:
+		// Default behavior: non-blocking send, drops task if queue is full
+		select {
+		case <-r.ctx.Done():
+			// Runner stopped, drop task
+			return
+		case r.workQueue <- task:
+			// Successfully queued
+			return
+		}
+
+	case QueuePolicyReject:
+		// Try to send, call callback if queue is full
+		select {
+		case <-r.ctx.Done():
+			// Runner stopped, drop task
+			return
+		case r.workQueue <- task:
+			// Successfully queued
+			return
+		default:
+			// Queue is full, reject the task
+			r.rejectedCount.Add(1)
+			if callback != nil {
+				// Call callback in goroutine to avoid blocking
+				go callback(task, traits)
+			}
+			return
+		}
+
+	case QueuePolicyWait:
+		// Blocking send, waits for space in queue or context cancellation
+		select {
+		case <-r.ctx.Done():
+			// Runner stopped, drop task
+			return
+		case r.workQueue <- task:
+			// Successfully queued
+			return
+		}
 	}
 }
 

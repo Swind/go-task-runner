@@ -689,3 +689,314 @@ func TestJobManager_ConcurrentSubmissions(t *testing.T) {
 		t.Fatalf("Timed out waiting for jobs, executed %d/%d", executionCount.Load(), jobCount)
 	}
 }
+
+// =============================================================================
+// Retry Behavior Tests
+// =============================================================================
+
+// FailingJobStore is a test store that simulates transient failures
+type FailingJobStore struct {
+	*core.MemoryJobStore
+	failCount     atomic.Int32
+	maxFailures   int
+	recovered     atomic.Bool
+}
+
+func NewFailingJobStore(maxFailures int) *FailingJobStore {
+	return &FailingJobStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+		maxFailures:    maxFailures,
+	}
+}
+
+func (s *FailingJobStore) UpdateStatus(ctx context.Context, id string, status core.JobStatus, result string) error {
+	// Fail for first N attempts, then succeed
+	if s.failCount.Load() < int32(s.maxFailures) {
+		s.failCount.Add(1)
+		return fmt.Errorf("simulated transient failure")
+	}
+	// After failures succeed
+	s.recovered.Store(true)
+	return s.MemoryJobStore.UpdateStatus(ctx, id, status, result)
+}
+
+func TestJobManager_RetrySuccess(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	// Create a store that fails twice then succeeds
+	store := NewFailingJobStore(2)
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Set retry policy to retry 3 times
+	manager.SetRetryPolicy(core.RetryPolicy{
+		MaxRetries:   3,
+		InitialDelay: 10 * time.Millisecond,
+		MaxDelay:     100 * time.Millisecond,
+		BackoffRatio: 1.5,
+	})
+
+	// Set logger to capture logs
+	logger := core.NewDefaultLogger()
+	manager.SetLogger(logger)
+
+	type EmailArgs struct {
+		To string
+	}
+
+	handlerCalled := atomic.Bool{}
+	handler := func(ctx context.Context, args EmailArgs) error {
+		handlerCalled.Store(true)
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+	time.Sleep(50 * time.Millisecond) // Wait for registration
+
+	// Submit job
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for execution and status update
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify handler was called
+	if !handlerCalled.Load() {
+		t.Error("Handler was not called")
+	}
+
+	// Verify the store recovered after retries
+	if !store.recovered.Load() {
+		t.Error("Store did not recover after retries")
+	}
+
+	// Verify job status is COMPLETED
+	job, err := manager.GetJob(context.Background(), "job1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusCompleted {
+		t.Errorf("Expected status COMPLETED, got %s", job.Status)
+	}
+}
+
+func TestJobManager_RetryExhausted(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	// Create a store that always fails
+	store := NewFailingJobStore(100) // Will always fail
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Set retry policy to retry only 2 times
+	manager.SetRetryPolicy(core.RetryPolicy{
+		MaxRetries:   2,
+		InitialDelay: 10 * time.Millisecond,
+		MaxDelay:     50 * time.Millisecond,
+		BackoffRatio: 1.5,
+	})
+
+	// Set error handler to capture final error
+	errorHandlerCalled := atomic.Bool{}
+	var lastError error
+	manager.SetErrorHandler(func(jobID string, operation string, err error) {
+		errorHandlerCalled.Store(true)
+		lastError = err
+	})
+
+	logger := core.NewDefaultLogger()
+	manager.SetLogger(logger)
+
+	type EmailArgs struct {
+		To string
+	}
+
+	handler := func(ctx context.Context, args EmailArgs) error {
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+	time.Sleep(50 * time.Millisecond)
+
+	// Submit job
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for execution and retry attempts
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify error handler was called
+	if !errorHandlerCalled.Load() {
+		t.Error("Error handler was not called after retry exhaustion")
+	}
+
+	if lastError == nil {
+		t.Error("Expected error to be passed to error handler")
+	}
+
+	// Verify job status - handler succeeded but status update failed
+	// This is expected behavior when all retries fail
+	_, _ = manager.GetJob(context.Background(), "job1")
+}
+
+func TestJobManager_RetryPolicyConfiguration(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	// Test default retry policy
+	defaultPolicy := manager.GetRetryPolicy()
+	if defaultPolicy.MaxRetries != 3 {
+		t.Errorf("Expected default MaxRetries=3, got %d", defaultPolicy.MaxRetries)
+	}
+
+	// Test setting custom retry policy
+	customPolicy := core.RetryPolicy{
+		MaxRetries:   5,
+		InitialDelay: 200 * time.Millisecond,
+		MaxDelay:     10 * time.Second,
+		BackoffRatio: 3.0,
+	}
+	manager.SetRetryPolicy(customPolicy)
+
+	retrieved := manager.GetRetryPolicy()
+	if retrieved.MaxRetries != 5 {
+		t.Errorf("Expected MaxRetries=5, got %d", retrieved.MaxRetries)
+	}
+	if retrieved.InitialDelay != 200*time.Millisecond {
+		t.Errorf("Expected InitialDelay=200ms, got %v", retrieved.InitialDelay)
+	}
+}
+
+func TestJobManager_NoRetry(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	// Create a store that fails
+	store := NewFailingJobStore(1)
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Set no retry policy
+	manager.SetRetryPolicy(core.NoRetry())
+
+	logger := core.NewDefaultLogger()
+	manager.SetLogger(logger)
+
+	type EmailArgs struct {
+		To string
+	}
+
+	handler := func(ctx context.Context, args EmailArgs) error {
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+	time.Sleep(50 * time.Millisecond)
+
+	// Submit job
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for execution
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the store only attempted once (no retries)
+	if store.failCount.Load() != 1 {
+		t.Errorf("Expected 1 failure with no retry, got %d", store.failCount.Load())
+	}
+}
+
+func TestLogger_DefaultLogger(t *testing.T) {
+	logger := core.NewDefaultLogger()
+
+	// These should not panic
+	logger.Debug("debug message", core.F("key", "value"))
+	logger.Info("info message", core.F("key", "value"))
+	logger.Warn("warn message", core.F("key", "value"))
+	logger.Error("error message", core.F("key", "value"))
+}
+
+func TestLogger_NoOpLogger(t *testing.T) {
+	logger := core.NewNoOpLogger()
+
+	// These should not panic
+	logger.Debug("debug message", core.F("key", "value"))
+	logger.Info("info message", core.F("key", "value"))
+	logger.Warn("warn message", core.F("key", "value"))
+	logger.Error("error message", core.F("key", "value"))
+}
+
+func TestRetryPolicy_CalculateDelay(t *testing.T) {
+	policy := core.RetryPolicy{
+		MaxRetries:   5,
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     500 * time.Millisecond,
+		BackoffRatio: 2.0,
+	}
+
+	// We can't test calculateDelay directly as it's private
+	// But we can verify the policy fields are set correctly
+	if policy.InitialDelay != 100*time.Millisecond {
+		t.Errorf("Expected InitialDelay=100ms, got %v", policy.InitialDelay)
+	}
+	if policy.MaxDelay != 500*time.Millisecond {
+		t.Errorf("Expected MaxDelay=500ms, got %v", policy.MaxDelay)
+	}
+	if policy.BackoffRatio != 2.0 {
+		t.Errorf("Expected BackoffRatio=2.0, got %f", policy.BackoffRatio)
+	}
+}
+
+func TestRetryPolicy_Defaults(t *testing.T) {
+	policy := core.DefaultRetryPolicy()
+
+	if policy.MaxRetries != 3 {
+		t.Errorf("Expected MaxRetries=3, got %d", policy.MaxRetries)
+	}
+	if policy.InitialDelay != 100*time.Millisecond {
+		t.Errorf("Expected InitialDelay=100ms, got %v", policy.InitialDelay)
+	}
+	if policy.MaxDelay != 5*time.Second {
+		t.Errorf("Expected MaxDelay=5s, got %v", policy.MaxDelay)
+	}
+	if policy.BackoffRatio != 2.0 {
+		t.Errorf("Expected BackoffRatio=2.0, got %f", policy.BackoffRatio)
+	}
+}
+
+func TestRetryPolicy_NoRetry(t *testing.T) {
+	policy := core.NoRetry()
+
+	if policy.MaxRetries != 0 {
+		t.Errorf("Expected MaxRetries=0, got %d", policy.MaxRetries)
+	}
+}

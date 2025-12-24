@@ -100,6 +100,35 @@ func (s *TaskScheduler) Shutdown() {
 	s.queue.Clear()
 }
 
+// ShutdownGraceful waits for all queued and active tasks to complete
+// Returns error if timeout is exceeded before tasks complete
+func (s *TaskScheduler) ShutdownGraceful(timeout time.Duration) error {
+	// 1. Mark as shutting down to stop accepting new tasks
+	atomic.StoreInt32(&s.shuttingDown, 1)
+
+	// 2. Stop DelayManager (no more new tasks generated)
+	s.delayManager.Stop()
+
+	// 3. Wait for queues to drain and active tasks to complete
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			// Timeout exceeded, force clear remaining queues
+			s.queue.Clear()
+			return fmt.Errorf("shutdown graceful timeout after %v, forced clearing", timeout)
+		case <-ticker.C:
+			// Check if all work is done
+			if s.QueuedTaskCount() == 0 && s.ActiveTaskCount() == 0 {
+				return nil
+			}
+		}
+	}
+}
+
 // Metrics
 func (s *TaskScheduler) WorkerCount() int     { return s.workerCount }
 func (s *TaskScheduler) QueuedTaskCount() int { return int(atomic.LoadInt32(&s.metricQueued)) }

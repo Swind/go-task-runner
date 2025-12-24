@@ -18,6 +18,9 @@ type RawJobHandler func(ctx context.Context, args []byte) error
 // TypedHandler is a generic handler type for type-safe job handlers
 type TypedHandler[T any] func(ctx context.Context, args T) error
 
+// ErrorHandler is called when an IO operation fails after all retries
+type ErrorHandler func(jobID string, operation string, err error)
+
 // JobManager manages job lifecycle using a three-layer runner architecture:
 // - Layer 1 (controlRunner): Fast control operations (<100μs, pure memory)
 // - Layer 2 (ioRunner): Sequential IO operations (database, file, network)
@@ -34,6 +37,11 @@ type JobManager struct {
 
 	store      JobStore
 	serializer JobSerializer
+
+	// Error handling and retry
+	retryPolicy  RetryPolicy
+	logger       Logger
+	errorHandler ErrorHandler
 
 	closed atomic.Bool
 }
@@ -60,7 +68,33 @@ func NewJobManager(
 		executionRunner: executionRunner,
 		store:           store,
 		serializer:      serializer,
+		retryPolicy:     DefaultRetryPolicy(),
+		logger:          NewNoOpLogger(), // Default: no logging
 	}
+}
+
+// =============================================================================
+// Configuration Methods
+// =============================================================================
+
+// SetRetryPolicy sets the retry policy for IO operations
+func (m *JobManager) SetRetryPolicy(policy RetryPolicy) {
+	m.retryPolicy = policy
+}
+
+// GetRetryPolicy returns the current retry policy
+func (m *JobManager) GetRetryPolicy() RetryPolicy {
+	return m.retryPolicy
+}
+
+// SetLogger sets the logger for JobManager
+func (m *JobManager) SetLogger(logger Logger) {
+	m.logger = logger
+}
+
+// SetErrorHandler sets a custom error handler for failed IO operations
+func (m *JobManager) SetErrorHandler(handler ErrorHandler) {
+	m.errorHandler = handler
 }
 
 // =============================================================================
@@ -320,12 +354,74 @@ func (m *JobManager) finalizeJobControl(id string, status JobStatus, msg string)
 	m.updateStatusIO(id, status, msg)
 }
 
+// =============================================================================
+// Retry Logic
+// =============================================================================
+
+// retryIOOperation executes an IO operation with retry logic
+// Returns the last error if all retries fail
+func (m *JobManager) retryIOOperation(
+	ctx context.Context,
+	operation string,
+	jobID string,
+	fn func(context.Context) error,
+) error {
+	var lastErr error
+	for attempt := 0; attempt <= m.retryPolicy.MaxRetries; attempt++ {
+		if err := fn(ctx); err == nil {
+			// Success
+			if attempt > 0 {
+				m.logger.Debug("IO operation succeeded after retry",
+					F("operation", operation),
+					F("jobID", jobID),
+					F("attempt", attempt))
+			}
+			return nil
+		} else {
+			lastErr = err
+			// Log retry attempt
+			m.logger.Warn("IO operation failed, retrying",
+				F("operation", operation),
+				F("jobID", jobID),
+				F("attempt", attempt),
+				F("maxRetries", m.retryPolicy.MaxRetries),
+				F("error", err))
+
+			if attempt < m.retryPolicy.MaxRetries {
+				// Calculate delay and wait
+				delay := m.retryPolicy.calculateDelay(attempt)
+				m.logger.Debug("Waiting before retry",
+					F("delay", delay),
+					F("attempt", attempt+1))
+				time.Sleep(delay)
+			}
+		}
+	}
+
+	// All retries failed
+	m.logger.Error("IO operation failed after all retries",
+		F("operation", operation),
+		F("jobID", jobID),
+		F("totalAttempts", m.retryPolicy.MaxRetries+1),
+		F("error", lastErr))
+
+	// Call error handler if set
+	if m.errorHandler != nil {
+		m.errorHandler(jobID, operation, lastErr)
+	}
+
+	return lastErr
+}
+
 func (m *JobManager) updateStatusIO(id string, status JobStatus, msg string) {
 	m.ioRunner.PostTask(func(_ context.Context) {
 		ctx := context.Background()
-		if err := m.store.UpdateStatus(ctx, id, status, msg); err != nil {
-			// Log error but don't fail
-			_ = err
+		// Use retry logic for status updates
+		if err := m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
+			return m.store.UpdateStatus(ctx, id, status, msg)
+		}); err != nil {
+			// Error already logged and handled by retryIOOperation
+			// No additional action needed here
 		}
 	})
 }
@@ -393,11 +489,15 @@ func (m *JobManager) doRecoveryIO(ctx context.Context) {
 	// 1. Mark RUNNING jobs as FAILED (interrupted by restart)
 	runningJobs, err := m.store.ListJobs(ctx, JobFilter{Status: JobStatusRunning})
 	if err != nil {
+		m.logger.Error("Failed to list running jobs during recovery", F("error", err))
 		return
 	}
 
 	for _, job := range runningJobs {
-		m.store.UpdateStatus(ctx, job.ID, JobStatusFailed, "Interrupted by restart")
+		// Use retry logic for status updates during recovery
+		_ = m.retryIOOperation(ctx, "RecoveryUpdateStatus", job.ID, func(ctx context.Context) error {
+			return m.store.UpdateStatus(ctx, job.ID, JobStatusFailed, "Interrupted by restart")
+		})
 	}
 
 	// 2. Recover PENDING jobs

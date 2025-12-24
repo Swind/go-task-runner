@@ -232,3 +232,115 @@ func (m *MockTaskRunner) IsClosed() bool                         { return false 
 func (m *MockTaskRunner) Name() string                           { return "MockTaskRunner" }
 func (m *MockTaskRunner) Metadata() map[string]interface{}       { return nil }
 func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }
+
+// =============================================================================
+// Graceful Shutdown Tests
+// =============================================================================
+
+func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
+	s := NewPriorityTaskScheduler(2)
+
+	// No tasks queued, should shutdown immediately
+	err := s.ShutdownGraceful(1 * time.Second)
+	if err != nil {
+		t.Fatalf("ShutdownGraceful failed: %v", err)
+	}
+
+	// Should reject new tasks
+	s.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
+	if s.QueuedTaskCount() != 0 {
+		t.Error("ShutdownGraceful should reject new tasks")
+	}
+}
+
+func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
+	s := NewFIFOTaskScheduler(2)
+
+	// Simulate active tasks directly (without going through queue)
+	// This simulates tasks that have already been picked up by workers
+	for i := 0; i < 3; i++ {
+		s.OnTaskStart()
+	}
+
+	if s.ActiveTaskCount() != 3 {
+		t.Fatalf("Setup failed: expected 3 active tasks, got %d", s.ActiveTaskCount())
+	}
+
+	// Complete the tasks in background
+	go func() {
+		for i := 0; i < 3; i++ {
+			time.Sleep(20 * time.Millisecond)
+			s.OnTaskEnd()
+		}
+	}()
+
+	// Start graceful shutdown - should wait for active tasks to complete
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.ShutdownGraceful(1 * time.Second)
+	}()
+
+	// Wait for shutdown to complete
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("ShutdownGraceful failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("ShutdownGraceful timed out")
+	}
+
+	// All tasks should have been "completed"
+	if s.ActiveTaskCount() != 0 {
+		t.Errorf("Expected 0 active tasks after shutdown, got %d", s.ActiveTaskCount())
+	}
+}
+
+func TestTaskScheduler_ShutdownGraceful_Timeout(t *testing.T) {
+	s := NewFIFOTaskScheduler(1)
+
+	// Simulate a task that never completes
+	s.OnTaskStart() // Mark a task as active
+
+	// Shutdown with short timeout - should timeout waiting for active task
+	err := s.ShutdownGraceful(50 * time.Millisecond)
+	if err == nil {
+		t.Error("Expected timeout error, got nil")
+	}
+
+	// Verify queue was cleared despite timeout
+	if s.QueuedTaskCount() != 0 {
+		t.Errorf("Expected queue to be cleared after timeout, got %d", s.QueuedTaskCount())
+	}
+}
+
+func TestTaskScheduler_ShutdownImmediateVsGraceful(t *testing.T) {
+	// Test immediate shutdown - clears queue immediately
+	s1 := NewFIFOTaskScheduler(1)
+	s1.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
+	s1.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
+
+	s1.Shutdown()
+	// Queue should be cleared, but note: metricQueued may not be reset
+	// This tests that Shutdown() doesn't block
+
+	// Test graceful shutdown - waits for active tasks to complete
+	s2 := NewFIFOTaskScheduler(1)
+	s2.OnTaskStart() // Simulate one active task
+
+	// Complete the task in background
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		s2.OnTaskEnd()
+	}()
+
+	// Graceful shutdown should wait and complete successfully
+	err := s2.ShutdownGraceful(500 * time.Millisecond)
+	if err != nil {
+		t.Errorf("Graceful shutdown failed: %v", err)
+	}
+
+	if s2.ActiveTaskCount() != 0 {
+		t.Errorf("Expected 0 active tasks after graceful shutdown, got %d", s2.ActiveTaskCount())
+	}
+}
