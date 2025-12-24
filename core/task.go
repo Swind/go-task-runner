@@ -30,8 +30,6 @@ const (
 
 type TaskTraits struct {
 	Priority TaskPriority
-	MayBlock bool
-	Category string
 }
 
 func DefaultTaskTraits() TaskTraits {

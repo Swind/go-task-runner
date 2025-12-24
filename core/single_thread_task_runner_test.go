@@ -499,7 +499,7 @@ func TestSingleThreadTaskRunner_QueuePolicyReject_Callback(t *testing.T) {
 	})
 
 	// Post tasks rapidly - with enough tasks, some should be rejected
-	customTraits := TaskTraits{Priority: TaskPriorityUserBlocking, Category: "test-reject"}
+	customTraits := TaskTraits{Priority: TaskPriorityUserBlocking}
 
 	// Post a large number of tasks rapidly
 	// The queue can only hold 100, so posting 200 should trigger rejections

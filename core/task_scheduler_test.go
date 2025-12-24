@@ -17,11 +17,11 @@ func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 	}
 
 	// Post tasks
-	s.PostInternal(makeTask("Low-1"), TaskTraits{Priority: TaskPriorityBestEffort, Category: "Low-1"})
-	s.PostInternal(makeTask("High-1"), TaskTraits{Priority: TaskPriorityUserBlocking, Category: "High-1"})
-	s.PostInternal(makeTask("Med-1"), TaskTraits{Priority: TaskPriorityUserVisible, Category: "Med-1"})
-	s.PostInternal(makeTask("High-2"), TaskTraits{Priority: TaskPriorityUserBlocking, Category: "High-2"})
-	s.PostInternal(makeTask("Low-2"), TaskTraits{Priority: TaskPriorityBestEffort, Category: "Low-2"})
+	s.PostInternal(makeTask("Low-1"), TaskTraits{Priority: TaskPriorityBestEffort})
+	s.PostInternal(makeTask("High-1"), TaskTraits{Priority: TaskPriorityUserBlocking})
+	s.PostInternal(makeTask("Med-1"), TaskTraits{Priority: TaskPriorityUserVisible})
+	s.PostInternal(makeTask("High-2"), TaskTraits{Priority: TaskPriorityUserBlocking})
+	s.PostInternal(makeTask("Low-2"), TaskTraits{Priority: TaskPriorityBestEffort})
 
 	expected := []string{"High-1", "High-2", "Med-1", "Low-1", "Low-2"}
 	stopCh := make(chan struct{})

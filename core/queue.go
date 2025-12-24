@@ -2,6 +2,7 @@ package core
 
 import (
 	"container/heap"
+	"math"
 	"sync"
 )
 
@@ -217,6 +218,19 @@ func NewPriorityTaskQueue() *PriorityTaskQueue {
 func (q *PriorityTaskQueue) Push(t Task, traits TaskTraits) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	// Handle sequence overflow - defensive programming
+	// In practice, uint64 overflow is virtually impossible (would take ~584 years
+	// at 1 billion pushes/second), but we check for correctness.
+	if q.nextSequence == math.MaxUint64 {
+		// If queue is empty, we can safely reset to 0
+		if len(q.pq) == 0 {
+			q.nextSequence = 0
+		}
+		// If queue is not empty, we continue - the sequence will wrap to 0,
+		// but this is acceptable as the wrapped values will still be unique
+		// and only affect FIFO order for tasks with exactly the same priority
+	}
 
 	item := &priorityItem{
 		TaskItem: TaskItem{Task: t, Traits: traits},
