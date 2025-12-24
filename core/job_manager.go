@@ -35,6 +35,10 @@ type JobManager struct {
 	handlers   sync.Map // map[string]RawJobHandler
 	activeJobs sync.Map // map[string]*activeJobInfo
 
+	// activeJobsMu protects the check-and-add operation for duplicate prevention
+	// This ensures atomic "check if exists + add" semantics
+	activeJobsMu sync.Mutex
+
 	store      JobStore
 	serializer JobSerializer
 
@@ -180,14 +184,17 @@ func (m *JobManager) submitJobControl(
 	traits TaskTraits,
 	delay time.Duration,
 ) error {
-	// 1. Fast duplicate check (memory only)
+	// 1. Fast duplicate check (memory only) - protected by mutex for atomic check-and-add
+	m.activeJobsMu.Lock()
 	if _, exists := m.activeJobs.Load(entity.ID); exists {
+		m.activeJobsMu.Unlock()
 		return fmt.Errorf("job %s is already active", entity.ID)
 	}
 
 	// 2. Get handler (fast memory lookup)
 	rawHandler, ok := m.handlers.Load(entity.Type)
 	if !ok {
+		m.activeJobsMu.Unlock()
 		return fmt.Errorf("handler for job type %s not found", entity.Type)
 	}
 	handler := rawHandler.(RawJobHandler)
@@ -201,6 +208,7 @@ func (m *JobManager) submitJobControl(
 		startTime: time.Now(),
 	}
 	m.activeJobs.Store(entity.ID, info)
+	m.activeJobsMu.Unlock()
 
 	// 4. Delegate to Layer 2 (IO operations)
 	m.submitJobIO(ctx, entity, jobCtx, handler, traits, delay, info)

@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1127,4 +1128,175 @@ func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
 	if job.Status != core.JobStatusCanceled {
 		t.Errorf("Expected status CANCELED, got %s", job.Status)
 	}
+}
+
+// =============================================================================
+// Duplicate Prevention Tests (Issue #6)
+// =============================================================================
+
+func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	// Handler that blocks until signaled
+	unblockHandler := make(chan struct{})
+	handler := func(ctx context.Context, args EmailArgs) error {
+		<-unblockHandler
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+
+	// Submit the same job ID concurrently from multiple goroutines
+	const concurrentSubmissions = 10
+	args := EmailArgs{To: "user@example.com"}
+	successCount := atomic.Int32{}
+	var firstErr error
+
+	// Use a WaitGroup to ensure all goroutines start submitting together
+	var wg sync.WaitGroup
+	wg.Add(concurrentSubmissions)
+
+	for i := 0; i < concurrentSubmissions; i++ {
+		go func() {
+			defer wg.Done()
+			err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+			if err == nil {
+				successCount.Add(1)
+			} else if firstErr == nil {
+				firstErr = err
+			}
+		}()
+	}
+
+	// Wait for all submissions to complete
+	wg.Wait()
+	time.Sleep(200 * time.Millisecond) // Give time for all submissions to be processed
+
+	// Only one submission should succeed
+	count := successCount.Load()
+	if count != 1 {
+		t.Errorf("Expected exactly 1 successful submission, got %d", count)
+	}
+
+	// Other submissions should have been rejected
+	if firstErr == nil {
+		t.Error("Expected some submissions to fail with duplicate error")
+	}
+
+	// Unblock the handler to clean up
+	close(unblockHandler)
+}
+
+func TestJobManager_DuplicatePrevention_Sequential(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	unblock := make(chan struct{})
+	handler := func(ctx context.Context, args EmailArgs) error {
+		<-unblock
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+
+	// Submit first job
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("First SubmitJob failed: %v", err)
+	}
+
+	// Wait for job to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to submit duplicate (should fail)
+	err = manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	if err == nil {
+		t.Error("Expected error for duplicate job submission")
+	}
+
+	// Unblock first job
+	close(unblock)
+}
+
+func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
+	// This test verifies that the database-level duplicate check works
+	// by simulating a scenario where a job exists in DB but not in activeJobs
+
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	// Manually create a PENDING job in the database (simulating restart scenario)
+	existingJob := &core.JobEntity{
+		ID:       "job1",
+		Type:     "email",
+		ArgsData: []byte(`{"to":"user@example.com"}`),
+		Status:   core.JobStatusPending,
+		Priority: 1,
+	}
+	ctx := context.Background()
+	if err := store.SaveJob(ctx, existingJob); err != nil {
+		t.Fatalf("Failed to create existing job in DB: %v", err)
+	}
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	handlerCalled := atomic.Bool{}
+	handler := func(ctx context.Context, args EmailArgs) error {
+		handlerCalled.Store(true)
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to submit a job with the same ID
+	args := EmailArgs{To: "user@example.com"}
+	err := manager.SubmitJob(ctx, "job1", "email", args, core.DefaultTaskTraits())
+
+	// The submission may succeed initially (passes activeJobs check)
+	// but the job should NOT execute because DB check will prevent it
+	// Actually, looking at the code more carefully:
+	// - submitJobControl passes (activeJobs empty)
+	// - submitJobIO finds duplicate in DB, rolls back activeJobs, returns
+	// - Job never executes
+
+	// Wait to verify handler was NOT called
+	time.Sleep(300 * time.Millisecond)
+
+	if handlerCalled.Load() {
+		t.Error("Handler should not have been called for duplicate job in database")
+	}
+
+	// Verify the existing job status in DB is still PENDING (not overwritten)
+	job, err := manager.GetJob(ctx, "job1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusPending {
+		t.Errorf("Expected status PENDING (original), got %s", job.Status)
+	}
+
+	_ = err // Submission error check depends on timing
 }
