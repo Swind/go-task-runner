@@ -40,6 +40,11 @@ func (m *MockThreadPool) QueuedTaskCount() int      { return 0 }
 func (m *MockThreadPool) ActiveTaskCount() int      { return 0 }
 func (m *MockThreadPool) DelayedTaskCount() int     { return 0 }
 
+// TestSequencedTaskRunner_SequentialExecution tests sequential task execution
+// Main test items:
+// 1. Tasks execute in first-in-first-out (FIFO) order
+// 2. Only one task executes at a time, then reposts runLoop
+// 3. Verify execution order matches expectations
 func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
@@ -111,6 +116,11 @@ func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_PreventsNewTasks tests that shutdown prevents new tasks
+// Main test items:
+// 1. Tasks submitted before shutdown execute normally
+// 2. Cannot submit new tasks after shutdown
+// 3. No new runLoop is sent after shutdown
 func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
@@ -151,6 +161,11 @@ func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_ClearsPendingQueue tests that shutdown clears the pending queue
+// Main test items:
+// 1. Shutdown clears all pending tasks in the queue
+// 2. Running runLoop after shutdown does not process any tasks
+// 3. Verify task counter remains at zero
 func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
@@ -180,6 +195,11 @@ func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts tests that shutdown from task prevents further posts
+// Main test items:
+// 1. Call Shutdown from within a task
+// 2. Attempting to submit new task after shutdown does not execute
+// 3. Verify only the first task is executed
 func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T) {
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
@@ -213,6 +233,11 @@ func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T)
 	}
 }
 
+// TestSequencedTaskRunner_Integration_WithRealThreadPool tests integration with real thread pool
+// Main test items:
+// 1. Create SequencedTaskRunner using real GoroutineThreadPool
+// 2. Verify multiple tasks execute correctly
+// 3. Cannot execute new tasks after shutdown
 func TestSequencedTaskRunner_Integration_WithRealThreadPool(t *testing.T) {
 	// Create and start a real GoroutineThreadPool with 2 workers
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
@@ -255,6 +280,11 @@ func TestSequencedTaskRunner_Integration_WithRealThreadPool(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Integration_WithGlobalThreadPool tests integration with global thread pool
+// Main test items:
+// 1. Create TaskRunner using global thread pool
+// 2. Verify tasks execute correctly
+// 3. Verify status and behavior after shutdown
 func TestSequencedTaskRunner_Integration_WithGlobalThreadPool(t *testing.T) {
 	// Initialize global thread pool with 2 workers
 	taskrunner.InitGlobalThreadPool(2)
@@ -299,6 +329,11 @@ func TestSequencedTaskRunner_Integration_WithGlobalThreadPool(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_WaitIdle tests waiting for idle state
+// Main test items:
+// 1. Submit multiple tasks with delays
+// 2. Call WaitIdle to wait for all tasks to complete
+// 3. Verify all tasks have finished executing
 func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 	// 1. Setup real thread pool
 	pool := taskrunner.NewGoroutineThreadPool("wait-idle-pool", 2)
@@ -333,6 +368,11 @@ func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_FlushAsync tests async flush functionality
+// Main test items:
+// 1. Submit multiple tasks
+// 2. Use FlushAsync to register callback function
+// 3. Verify callback is executed after all tasks complete
 func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 	// 1. Setup real thread pool
 	pool := taskrunner.NewGoroutineThreadPool("flush-async-pool", 2)
@@ -380,6 +420,11 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_WaitShutdown tests waiting for shutdown signal
+// Main test items:
+// 1. Wait for shutdown signal in another goroutine
+// 2. Submit and execute tasks
+// 3. Shutdown runner and verify signal is received
 func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
 	// 1. Setup real thread pool
 	pool := taskrunner.NewGoroutineThreadPool("wait-shutdown-pool", 2)
@@ -427,6 +472,11 @@ func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_GarbageCollection tests garbage collection mechanism
+// Main test items:
+// 1. Create SequencedTaskRunner and set finalizer
+// 2. Shutdown and drop reference
+// 3. Verify object can be correctly garbage collected
 func TestSequencedTaskRunner_GarbageCollection(t *testing.T) {
 	// 1. Setup
 	// Create a channel to signal finalizer execution
@@ -464,6 +514,11 @@ func TestSequencedTaskRunner_GarbageCollection(t *testing.T) {
 	t.Fatal("SequencedTaskRunner was not garbage collected (finalizer not called)")
 }
 
+// TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool tests garbage collection with real thread pool
+// Main test items:
+// 1. Use real GoroutineThreadPool
+// 2. Ensure tasks finish and close runner
+// 3. Verify runner can be garbage collected
 func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) {
 	// 1. Setup
 	finalizerCalled := make(chan struct{})
@@ -525,6 +580,11 @@ func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) 
 	t.Fatal("SequencedTaskRunner with Real ThreadPool was not garbage collected")
 }
 
+// TestSequencedTaskRunner_GetThreadPool tests getting the thread pool
+// Main test items:
+// 1. Create SequencedTaskRunner and specify thread pool
+// 2. Call GetThreadPool to get the thread pool
+// 3. Verify returned pool matches the one specified at creation
 func TestSequencedTaskRunner_GetThreadPool(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())

@@ -7,6 +7,12 @@ import (
 	taskrunner "github.com/Swind/go-task-runner"
 )
 
+// TestTaskRunner_NameAndMetadata tests TaskRunner name and metadata methods
+// Main test items:
+// 1. Name() and Metadata() return empty values by default
+// 2. SetName() sets the runner name
+// 3. SetMetadata() adds key-value pairs to metadata
+// 4. Metadata() returns a copy, not the original map
 func TestTaskRunner_NameAndMetadata(t *testing.T) {
 	t.Run("SequencedTaskRunner", func(t *testing.T) {
 		pool := taskrunner.NewGoroutineThreadPool("test-pool", 1)

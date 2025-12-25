@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// TestPriorityTaskScheduler_ExecutionOrder tests priority-based task execution order
+// Main test items:
+// 1. High priority tasks execute before medium priority
+// 2. Medium priority tasks execute before low priority
+// 3. Tasks with same priority execute in FIFO order
 func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 	s := NewPriorityTaskScheduler(1)
 
@@ -41,6 +46,11 @@ func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 	}
 }
 
+// TestFIFOTaskScheduler_ExecutionOrder tests FIFO execution order (ignores priority)
+// Main test items:
+// 1. Tasks execute in insertion order
+// 2. Priority is ignored
+// 3. First-in, First-out order is maintained
 func TestFIFOTaskScheduler_ExecutionOrder(t *testing.T) {
 	s := NewFIFOTaskScheduler(1)
 
@@ -78,6 +88,11 @@ func TestFIFOTaskScheduler_ExecutionOrder(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_Metrics tests scheduler metric reporting
+// Main test items:
+// 1. WorkerCount returns configured worker count
+// 2. QueuedTaskCount reports queued tasks accurately
+// 3. ActiveTaskCount reports active tasks accurately
 func TestTaskScheduler_Metrics(t *testing.T) {
 	s := NewPriorityTaskScheduler(2)
 
@@ -126,6 +141,10 @@ func TestTaskScheduler_Metrics(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_Shutdown tests immediate shutdown behavior
+// Main test items:
+// 1. Shutdown() clears the queue
+// 2. New tasks are rejected after shutdown
 func TestTaskScheduler_Shutdown(t *testing.T) {
 	s := NewPriorityTaskScheduler(1)
 	noop := func(ctx context.Context) {}
@@ -144,6 +163,11 @@ func TestTaskScheduler_Shutdown(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_DelayedTask tests delayed task execution
+// Main test items:
+// 1. Delayed task executes after specified delay
+// 2. DelayedTaskCount is updated correctly
+// 3. Task is posted to target runner after delay
 func TestTaskScheduler_DelayedTask(t *testing.T) {
 	s := NewPriorityTaskScheduler(1)
 	// We need a helper to act as the target runner for delayed tasks
@@ -237,6 +261,10 @@ func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }
 // Graceful Shutdown Tests
 // =============================================================================
 
+// TestTaskScheduler_ShutdownGraceful_EmptyQueue tests graceful shutdown with no pending tasks
+// Main test items:
+// 1. ShutdownGraceful completes immediately when queue is empty
+// 2. New tasks are rejected after graceful shutdown
 func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
 	s := NewPriorityTaskScheduler(2)
 
@@ -253,6 +281,11 @@ func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_ShutdownGraceful_WithActiveTasks tests graceful shutdown with active tasks
+// Main test items:
+// 1. ShutdownGraceful waits for active tasks to complete
+// 2. Returns nil when all active tasks finish
+// 3. ActiveTaskCount is 0 after shutdown
 func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
 	s := NewFIFOTaskScheduler(2)
 
@@ -296,6 +329,10 @@ func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_ShutdownGraceful_Timeout tests graceful shutdown timeout behavior
+// Main test items:
+// 1. ShutdownGraceful returns error when timeout occurs
+// 2. Queue is cleared even when timeout happens
 func TestTaskScheduler_ShutdownGraceful_Timeout(t *testing.T) {
 	s := NewFIFOTaskScheduler(1)
 
@@ -314,6 +351,11 @@ func TestTaskScheduler_ShutdownGraceful_Timeout(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_ShutdownImmediateVsGraceful tests immediate vs graceful shutdown
+// Main test items:
+// 1. Immediate Shutdown() clears queue without waiting
+// 2. Graceful ShutdownGraceful() waits for active tasks
+// 3. Both methods prevent new tasks from being added
 func TestTaskScheduler_ShutdownImmediateVsGraceful(t *testing.T) {
 	// Test immediate shutdown - clears queue immediately
 	s1 := NewFIFOTaskScheduler(1)

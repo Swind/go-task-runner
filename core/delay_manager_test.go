@@ -15,6 +15,12 @@ import (
 // DelayManager Performance Tests
 // =============================================================================
 
+// TestDelayManager_BatchProcessing tests batch processing of expired tasks
+// Main test items:
+// 1. Verify that a large number of tasks expiring simultaneously can be batch processed
+// 2. Confirm that all tasks are executed correctly
+// 3. Verify the efficiency of batch processing (100 tasks complete within 300ms)
+// 4. Confirm that the processExpiredTasks() method correctly handles all expired tasks
 func TestDelayManager_BatchProcessing(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -46,6 +52,12 @@ func TestDelayManager_BatchProcessing(t *testing.T) {
 	}
 }
 
+// TestDelayManager_ConcurrentAdd tests concurrent addition of delayed tasks
+// Main test items:
+// 1. Verify thread safety when multiple goroutines add tasks simultaneously
+// 2. Confirm that tasks with different delays execute in the correct order
+// 3. Verify the correctness of AddDelayedTask in concurrent environments
+// 4. Confirm that all added tasks are eventually executed
 func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -85,6 +97,13 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	}
 }
 
+// TestDelayManager_HighFrequencyTimerResets tests high-frequency timer resets
+// Main test items:
+// 1. Simulate rapid consecutive task additions causing frequent wakeups
+// 2. Verify the correctness of the wakeup channel mechanism
+// 3. Confirm that timer resets do not lose tasks
+// 4. Verify system stability under high-frequency operations
+// Note: This test is timing-sensitive, uses t.Logf instead of t.Errorf to allow for occasional failures
 func TestDelayManager_HighFrequencyTimerResets(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -129,6 +148,12 @@ func TestDelayManager_HighFrequencyTimerResets(t *testing.T) {
 	}
 }
 
+// TestDelayManager_EmptyQueue tests empty queue behavior
+// Main test items:
+// 1. Verify that TaskCount returns 0 when the queue is empty
+// 2. Confirm that an empty queue does not cause crashes or anomalies
+// 3. Verify that adding tasks to an empty queue works correctly
+// 4. Confirm that the timer is handled correctly when the queue is empty
 func TestDelayManager_EmptyQueue(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -159,6 +184,12 @@ func TestDelayManager_EmptyQueue(t *testing.T) {
 	}
 }
 
+// TestDelayManager_MultipleDelays tests tasks with multiple different delays
+// Main test items:
+// 1. Verify that tasks with different delays execute in the correct order
+// 2. Confirm the correctness of Heap ordering (shortest delay executes first)
+// 3. Verify that task execution times match the expected delay order
+// 4. Confirm that multiple delayed tasks do not interfere with each other
 func TestDelayManager_MultipleDelays(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -201,6 +232,12 @@ func TestDelayManager_MultipleDelays(t *testing.T) {
 	}
 }
 
+// TestDelayManager_TaskCount tests the task count functionality
+// Main test items:
+// 1. Verify that TaskCount returns 0 when the queue is empty
+// 2. Confirm that TaskCount increments correctly after adding tasks
+// 3. Verify the immediacy of TaskCount (synchronous read)
+// 4. Confirm that the count decreases correctly after task execution
 func TestDelayManager_TaskCount(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -231,6 +268,12 @@ func TestDelayManager_TaskCount(t *testing.T) {
 	}
 }
 
+// TestDelayManager_AccurateTiming tests the precision of delay times
+// Main test items:
+// 1. Verify that delayed tasks execute after the specified delay time
+// 2. Confirm that the delay time precision is within an acceptable range (+/- 20ms)
+// 3. Verify the correctness of the timer mechanism
+// 4. Confirm that the calculateNextRun() method correctly calculates the next execution time
 func TestDelayManager_AccurateTiming(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer dm.Stop()
@@ -258,7 +301,7 @@ func TestDelayManager_AccurateTiming(t *testing.T) {
 	executed := time.Unix(0, executedAt.Load())
 	elapsed := executed.Sub(start)
 
-	// Should be approximately 50ms, allow ±20ms tolerance
+	// Should be approximately 50ms, allow +/- 20ms tolerance
 	if elapsed < 30*time.Millisecond || elapsed > 70*time.Millisecond {
 		t.Errorf("Expected ~50ms delay, got %v", elapsed)
 	}

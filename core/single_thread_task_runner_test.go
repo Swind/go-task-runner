@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// TestSingleThreadTaskRunner_BasicExecution tests basic execution functionality
+// Main test items:
+// 1. Create SingleThreadTaskRunner and submit tasks
+// 2. Verify tasks execute correctly
+// 3. Task execution flags are set correctly
 func TestSingleThreadTaskRunner_BasicExecution(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -25,6 +30,11 @@ func TestSingleThreadTaskRunner_BasicExecution(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_ExecutionOrder tests execution order
+// Main test items:
+// 1. Submit multiple tasks to SingleThreadTaskRunner
+// 2. Verify tasks execute in submission order (FIFO)
+// 3. All tasks are executed correctly
 func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -55,6 +65,11 @@ func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_ThreadAffinity tests thread affinity
+// Main test items:
+// 1. Verify all tasks execute on the same goroutine
+// 2. Confirm thread affinity via goroutine ID
+// 3. Tasks do not switch to other goroutines during execution
 func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -96,6 +111,11 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_DelayedTask tests delayed task
+// Main test items:
+// 1. Submit delayed task and verify it doesn't execute immediately
+// 2. Verify task executes after delay time expires
+// 3. Verify actual delay time matches expectations
 func TestSingleThreadTaskRunner_DelayedTask(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -125,6 +145,11 @@ func TestSingleThreadTaskRunner_DelayedTask(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_RepeatingTask tests repeating task
+// Main test items:
+// 1. Create repeating task
+// 2. Verify task repeats at specified interval
+// 3. Task stops executing after calling Stop
 func TestSingleThreadTaskRunner_RepeatingTask(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -155,6 +180,11 @@ func TestSingleThreadTaskRunner_RepeatingTask(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay tests repeating task with initial delay
+// Main test items:
+// 1. Create repeating task with initial delay
+// 2. Verify task doesn't execute during initial delay
+// 3. Verify task starts periodic execution after initial delay
 func TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -193,6 +223,11 @@ func TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_Shutdown tests shutdown functionality
+// Main test items:
+// 1. Verify runner is not closed initially
+// 2. Runner is in closed state after calling Shutdown
+// 3. IsClosed method correctly reflects closed state
 func TestSingleThreadTaskRunner_Shutdown(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -210,6 +245,11 @@ func TestSingleThreadTaskRunner_Shutdown(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks tests that shutdown stops repeating tasks
+// Main test items:
+// 1. Create and start repeating task
+// 2. Call Shutdown to close runner
+// 3. Verify repeating task stops after shutdown
 func TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -236,6 +276,11 @@ func TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_PostTaskAfterShutdown tests posting tasks after shutdown
+// Main test items:
+// 1. Shutdown runner first
+// 2. Attempt to submit tasks after shutdown
+// 3. Verify tasks submitted after shutdown are not executed
 func TestSingleThreadTaskRunner_PostTaskAfterShutdown(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	runner.Shutdown()
@@ -255,6 +300,11 @@ func TestSingleThreadTaskRunner_PostTaskAfterShutdown(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_Stop tests stop functionality
+// Main test items:
+// 1. Verify Stop correctly closes runner
+// 2. Tasks before stop can complete execution
+// 3. Tasks submitted after stop do not execute
 func TestSingleThreadTaskRunner_Stop(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -291,6 +341,11 @@ func TestSingleThreadTaskRunner_Stop(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_MultipleRepeatingTasks tests multiple repeating tasks
+// Main test items:
+// 1. Run multiple repeating tasks with different periods simultaneously
+// 2. Verify each task executes at its respective period
+// 3. Stop each repeating task individually
 func TestSingleThreadTaskRunner_MultipleRepeatingTasks(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -346,6 +401,11 @@ func TestSingleThreadTaskRunner_MultipleRepeatingTasks(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_PanicRecovery tests panic recovery
+// Main test items:
+// 1. Submit task that will panic
+// 2. Verify subsequent tasks can still execute after panic
+// 3. Runner remains in normal operating state after panic
 func TestSingleThreadTaskRunner_PanicRecovery(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -375,6 +435,11 @@ func TestSingleThreadTaskRunner_PanicRecovery(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_IdempotentShutdown tests idempotent shutdown
+// Main test items:
+// 1. Call Shutdown and Stop methods multiple times
+// 2. Verify repeated calls do not cause errors
+// 3. Ensure runner is correctly in closed state
 func TestSingleThreadTaskRunner_IdempotentShutdown(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -389,6 +454,11 @@ func TestSingleThreadTaskRunner_IdempotentShutdown(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_ConcurrentPostTask tests concurrent task submission
+// Main test items:
+// 1. Submit tasks concurrently from multiple goroutines
+// 2. Verify all tasks are executed correctly
+// 3. Ensure no tasks are lost in concurrent scenarios
 func TestSingleThreadTaskRunner_ConcurrentPostTask(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -426,6 +496,11 @@ func TestSingleThreadTaskRunner_ConcurrentPostTask(t *testing.T) {
 // Queue Policy Tests
 // =============================================================================
 
+// TestSingleThreadTaskRunner_PolicyConfiguration tests queue policy configuration
+// Main test items:
+// 1. Verify default queue policy is Drop
+// 2. Test setting different queue policies
+// 3. Configure rejection callback function
 func TestSingleThreadTaskRunner_PolicyConfiguration(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -459,6 +534,11 @@ func TestSingleThreadTaskRunner_PolicyConfiguration(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_QueuePolicyAfterClosed tests queue policy after close
+// Main test items:
+// 1. Set reject policy and close runner
+// 2. Set rejection callback after close
+// 3. Verify tasks submitted after close don't trigger rejection callback
 func TestSingleThreadTaskRunner_QueuePolicyAfterClosed(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -482,7 +562,11 @@ func TestSingleThreadTaskRunner_QueuePolicyAfterClosed(t *testing.T) {
 	runner.Stop()
 }
 
-// Test queue policy rejection callback with a simpler approach
+// TestSingleThreadTaskRunner_QueuePolicyReject_Callback tests rejection policy callback
+// Main test items:
+// 1. Set reject policy and callback function
+// 2. Rapidly submit large number of tasks to fill queue
+// 3. Verify rejected tasks trigger callback
 func TestSingleThreadTaskRunner_QueuePolicyReject_Callback(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -523,7 +607,11 @@ func TestSingleThreadTaskRunner_QueuePolicyReject_Callback(t *testing.T) {
 	}
 }
 
-// Test that different policies handle overflow differently
+// TestSingleThreadTaskRunner_QueuePolicy_DropVsReject tests difference between Drop and Reject policies
+// Main test items:
+// 1. Test Drop policy: tasks are silently dropped
+// 2. Test Reject policy: tasks are rejected and counted
+// 3. Verify different behaviors of the two policies
 func TestSingleThreadTaskRunner_QueuePolicy_DropVsReject(t *testing.T) {
 	// Test Drop policy (default)
 	runner1 := NewSingleThreadTaskRunner()

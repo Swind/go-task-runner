@@ -11,6 +11,11 @@ import (
 // Basic PostTaskAndReply Tests
 // =============================================================================
 
+// TestPostTaskAndReply_BasicExecution tests basic task and reply execution
+// Main test items:
+// 1. Task executes correctly
+// 2. Reply executes correctly
+// 3. Both task and reply execute on the correct Runner
 func TestPostTaskAndReply_BasicExecution(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -41,6 +46,11 @@ func TestPostTaskAndReply_BasicExecution(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReply_ExecutionOrder tests the execution order of task and reply (task first, then reply)
+// Main test items:
+// 1. Task executes before reply
+// 2. Execution order matches expected [task, reply]
+// 3. Time interval handling is correct
 func TestPostTaskAndReply_ExecutionOrder(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -77,6 +87,11 @@ func TestPostTaskAndReply_ExecutionOrder(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReply_TaskPanic tests that reply does not execute when task panics
+// Main test items:
+// 1. Task panic does not affect other tasks
+// 2. Reply does not execute after task panic
+// 3. Error handling mechanism works correctly
 func TestPostTaskAndReply_TaskPanic(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -105,6 +120,11 @@ func TestPostTaskAndReply_TaskPanic(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReply_NilReplyRunner tests handling of nil replyRunner
+// Main test items:
+// 1. Task still executes when replyRunner is nil
+// 2. Should not panic
+// 3. Error handling mechanism works correctly
 func TestPostTaskAndReply_NilReplyRunner(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -136,6 +156,11 @@ func TestPostTaskAndReply_NilReplyRunner(t *testing.T) {
 // PostTaskAndReplyWithTraits Tests
 // =============================================================================
 
+// TestPostTaskAndReplyWithTraits_DifferentPriorities tests tasks and replies with different priorities
+// Main test items:
+// 1. Tasks with different priorities execute normally
+// 2. TraitsBestEffort() low priority task
+// 3. TraitsUserBlocking() high priority reply
 func TestPostTaskAndReplyWithTraits_DifferentPriorities(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -172,6 +197,11 @@ func TestPostTaskAndReplyWithTraits_DifferentPriorities(t *testing.T) {
 // Generic PostTaskAndReplyWithResult Tests
 // =============================================================================
 
+// TestPostTaskAndReplyWithResult_IntResult tests generic version returning int result
+// Main test items:
+// 1. Correctly pass back int result
+// 2. Handling when there are no errors
+// 3. Generic type is correct
 func TestPostTaskAndReplyWithResult_IntResult(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -205,6 +235,11 @@ func TestPostTaskAndReplyWithResult_IntResult(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReplyWithResult_StringResult tests generic version returning string result
+// Main test items:
+// 1. Correctly pass back string result
+// 2. String serialization and deserialization
+// 3. Correctness of result passing
 func TestPostTaskAndReplyWithResult_StringResult(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -234,6 +269,11 @@ func TestPostTaskAndReplyWithResult_StringResult(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReplyWithResult_StructResult tests generic version returning struct result
+// Main test items:
+// 1. Correctly pass back complex struct
+// 2. Pointer passing and content correctness
+// 3. Correctness of struct fields
 func TestPostTaskAndReplyWithResult_StructResult(t *testing.T) {
 	type UserData struct {
 		Name string
@@ -268,6 +308,11 @@ func TestPostTaskAndReplyWithResult_StructResult(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReplyWithResult_WithError tests error return scenario
+// Main test items:
+// 1. Error is correctly passed to reply
+// 2. context.DeadlineExceeded error handling
+// 3. Error message does not affect result passing
 func TestPostTaskAndReplyWithResult_WithError(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -301,6 +346,11 @@ func TestPostTaskAndReplyWithResult_WithError(t *testing.T) {
 // PostDelayedTaskAndReplyWithResult Tests
 // =============================================================================
 
+// TestPostDelayedTaskAndReplyWithResult_Timing tests the timing of delayed task and reply
+// Main test items:
+// 1. Time precision of delayed task
+// 2. Reply executes immediately after task completion
+// 3. Correctness of timing control
 func TestPostDelayedTaskAndReplyWithResult_Timing(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -344,6 +394,11 @@ func TestPostDelayedTaskAndReplyWithResult_Timing(t *testing.T) {
 // SingleThreadTaskRunner Tests
 // =============================================================================
 
+// TestSingleThreadTaskRunner_PostTaskAndReply tests PostTaskAndReply with SingleThreadTaskRunner
+// Main test items:
+// 1. Basic functionality of SingleThreadTaskRunner
+// 2. Correct execution of task and reply
+// 3. Characteristics of single-thread task scheduler
 func TestSingleThreadTaskRunner_PostTaskAndReply(t *testing.T) {
 	targetRunner := NewSingleThreadTaskRunner()
 	defer targetRunner.Stop()
@@ -373,6 +428,11 @@ func TestSingleThreadTaskRunner_PostTaskAndReply(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_PostTaskAndReplyWithResult tests generic version with SingleThreadTaskRunner
+// Main test items:
+// 1. Generic support of SingleThreadTaskRunner
+// 2. Result is correctly passed
+// 3. Generic handling in single-thread environment
 func TestSingleThreadTaskRunner_PostTaskAndReplyWithResult(t *testing.T) {
 	targetRunner := NewSingleThreadTaskRunner()
 	defer targetRunner.Stop()
@@ -404,6 +464,11 @@ func TestSingleThreadTaskRunner_PostTaskAndReplyWithResult(t *testing.T) {
 // Cross-Runner Tests
 // =============================================================================
 
+// TestPostTaskAndReply_CrossRunner tests task and reply across different Runners
+// Main test items:
+// 1. Communication from SequencedTaskRunner to SingleThreadTaskRunner
+// 2. Task passing between different types of Runners
+// 3. Correctness of cross-Runner execution
 func TestPostTaskAndReply_CrossRunner(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -437,6 +502,11 @@ func TestPostTaskAndReply_CrossRunner(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReplyWithResult_SameRunner tests task and reply on the same Runner
+// Main test items:
+// 1. Task and reply execute on the same Runner
+// 2. Correctness of execution order
+// 3. Task scheduling on the same Runner
 func TestPostTaskAndReplyWithResult_SameRunner(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -475,6 +545,11 @@ func TestPostTaskAndReplyWithResult_SameRunner(t *testing.T) {
 // Traits Tests
 // =============================================================================
 
+// TestPostTaskAndReplyWithResultAndTraits tests generic version with traits
+// Main test items:
+// 1. Generic version supports Traits functionality
+// 2. Tasks and replies with different priorities
+// 3. Combined use of Traits and generic version
 func TestPostTaskAndReplyWithResultAndTraits(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -509,6 +584,11 @@ func TestPostTaskAndReplyWithResultAndTraits(t *testing.T) {
 	}
 }
 
+// TestTraitsUserVisible tests the TraitsUserVisible() helper function
+// Main test items:
+// 1. TraitsUserVisible() returns correct priority
+// 2. Correctness of helper function implementation
+// 3. Correctness of priority setting
 func TestTraitsUserVisible(t *testing.T) {
 	traits := TraitsUserVisible()
 	if traits.Priority != TaskPriorityUserVisible {
@@ -516,6 +596,11 @@ func TestTraitsUserVisible(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_GetThreadPool tests that SingleThreadTaskRunner's GetThreadPool returns nil
+// Main test items:
+// 1. SingleThreadTaskRunner does not use a thread pool
+// 2. GetThreadPool() returns nil
+// 3. Verification of independent thread characteristics
 func TestSingleThreadTaskRunner_GetThreadPool(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 
@@ -528,6 +613,11 @@ func TestSingleThreadTaskRunner_GetThreadPool(t *testing.T) {
 	runner.Shutdown()
 }
 
+// TestSingleThreadTaskRunner_PostTaskAndReplyWithTraits tests version with traits on SingleThreadTaskRunner
+// Main test items:
+// 1. Traits support of SingleThreadTaskRunner
+// 2. Handling of tasks with different priorities
+// 3. Priority control in single-thread environment
 func TestSingleThreadTaskRunner_PostTaskAndReplyWithTraits(t *testing.T) {
 	targetRunner := NewSingleThreadTaskRunner()
 	defer targetRunner.Shutdown()

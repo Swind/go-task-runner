@@ -16,6 +16,11 @@ import (
 // JobStore Tests
 // =============================================================================
 
+// TestMemoryJobStore_SaveAndGet tests saving and retrieving a job
+// Main test items:
+// 1. Job can be saved to the store
+// 2. Saved job can be retrieved by ID
+// 3. Retrieved job has correct ID and status
 func TestMemoryJobStore_SaveAndGet(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -47,6 +52,11 @@ func TestMemoryJobStore_SaveAndGet(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_UpdateStatus tests updating job status
+// Main test items:
+// 1. Job status can be updated via UpdateStatus method
+// 2. Updated status is persisted correctly
+// 3. Status change from PENDING to RUNNING works correctly
 func TestMemoryJobStore_UpdateStatus(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -71,6 +81,11 @@ func TestMemoryJobStore_UpdateStatus(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_ListJobs tests listing jobs with filters
+// Main test items:
+// 1. All jobs can be listed without filters
+// 2. Jobs can be filtered by status
+// 3. Limit parameter works correctly for pagination
 func TestMemoryJobStore_ListJobs(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -117,6 +132,11 @@ func TestMemoryJobStore_ListJobs(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_GetRecoverableJobs tests retrieving recoverable (PENDING) jobs
+// Main test items:
+// 1. Only PENDING jobs are returned as recoverable
+// 2. RUNNING and COMPLETED jobs are excluded
+// 3. Multiple PENDING jobs are all returned
 func TestMemoryJobStore_GetRecoverableJobs(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -148,6 +168,11 @@ func TestMemoryJobStore_GetRecoverableJobs(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_DeleteJob tests deleting a job
+// Main test items:
+// 1. Job can be deleted by ID
+// 2. Deleted job no longer exists in store
+// 3. GetJob returns error for deleted job
 func TestMemoryJobStore_DeleteJob(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -171,6 +196,11 @@ func TestMemoryJobStore_DeleteJob(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_Clear tests clearing all jobs from store
+// Main test items:
+// 1. Clear removes all jobs from the store
+// 2. Count returns 0 after clear
+// 3. Individual jobs cannot be retrieved after clear
 func TestMemoryJobStore_Clear(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -206,6 +236,11 @@ func TestMemoryJobStore_Clear(t *testing.T) {
 	}
 }
 
+// TestMemoryJobStore_Count tests counting jobs in store
+// Main test items:
+// 1. Count returns 0 for empty store
+// 2. Count increments correctly as jobs are added
+// 3. Count decrements correctly as jobs are deleted
 func TestMemoryJobStore_Count(t *testing.T) {
 	store := core.NewMemoryJobStore()
 	ctx := context.Background()
@@ -243,6 +278,11 @@ func TestMemoryJobStore_Count(t *testing.T) {
 // JobSerializer Tests
 // =============================================================================
 
+// TestJSONSerializer_Serialize tests serializing args to JSON
+// Main test items:
+// 1. Struct can be serialized to JSON bytes
+// 2. Serialized data is not empty
+// 3. JSON tags are respected during serialization
 func TestJSONSerializer_Serialize(t *testing.T) {
 	serializer := core.NewJSONSerializer()
 
@@ -266,6 +306,11 @@ func TestJSONSerializer_Serialize(t *testing.T) {
 	}
 }
 
+// TestJSONSerializer_Deserialize tests deserializing JSON to struct
+// Main test items:
+// 1. JSON bytes can be deserialized to struct
+// 2. Deserialized values match original values
+// 3. Struct fields are correctly populated
 func TestJSONSerializer_Deserialize(t *testing.T) {
 	serializer := core.NewJSONSerializer()
 
@@ -292,6 +337,11 @@ func TestJSONSerializer_Deserialize(t *testing.T) {
 	}
 }
 
+// TestJSONSerializer_NilHandling tests edge cases with nil values
+// Main test items:
+// 1. Serializing nil produces "null" JSON
+// 2. Deserializing to nil target fails safely
+// 3. Deserializing empty data fails safely
 func TestJSONSerializer_NilHandling(t *testing.T) {
 	serializer := core.NewJSONSerializer()
 
@@ -342,6 +392,11 @@ func setupJobManager(t *testing.T) (*core.JobManager, func()) {
 	return manager, cleanup
 }
 
+// TestJobManager_RegisterHandler tests registering job handlers
+// Main test items:
+// 1. Handler can be registered for a job type
+// 2. Registration completes successfully
+// 3. Handler is stored for later use during job execution
 func TestJobManager_RegisterHandler(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -367,6 +422,11 @@ func TestJobManager_RegisterHandler(t *testing.T) {
 	// So we'll test by submitting a job later
 }
 
+// TestJobManager_SubmitAndExecute tests submitting and executing a job
+// Main test items:
+// 1. Job can be submitted with args
+// 2. Registered handler is called with correct args
+// 3. Job status changes to COMPLETED after successful execution
 func TestJobManager_SubmitAndExecute(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -412,6 +472,11 @@ func TestJobManager_SubmitAndExecute(t *testing.T) {
 	}
 }
 
+// TestJobManager_SubmitDelayedJob tests submitting a delayed job
+// Main test items:
+// 1. Job can be submitted with a delay
+// 2. Job does not execute before the delay elapses
+// 3. Job executes after the specified delay
 func TestJobManager_SubmitDelayedJob(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -448,6 +513,11 @@ func TestJobManager_SubmitDelayedJob(t *testing.T) {
 	}
 }
 
+// TestJobManager_CancelJob tests cancelling a running job
+// Main test items:
+// 1. Running job can be cancelled via CancelJob
+// 2. Handler context is cancelled when job is cancelled
+// 3. Job status changes to CANCELED after cancellation
 func TestJobManager_CancelJob(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -505,6 +575,11 @@ func TestJobManager_CancelJob(t *testing.T) {
 	}
 }
 
+// TestJobManager_JobFailure tests handling failed job execution
+// Main test items:
+// 1. Job status changes to FAILED when handler returns error
+// 2. Error message is stored in job Result field
+// 3. Failed job is retrievable with correct status
 func TestJobManager_JobFailure(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -548,6 +623,11 @@ func TestJobManager_JobFailure(t *testing.T) {
 	}
 }
 
+// TestJobManager_DuplicateSubmission tests duplicate job submission prevention
+// Main test items:
+// 1. Second submission with same job ID is rejected
+// 2. Error is returned for duplicate submission
+// 3. First job continues normally
 func TestJobManager_DuplicateSubmission(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -591,6 +671,11 @@ func TestJobManager_DuplicateSubmission(t *testing.T) {
 	close(unblock)
 }
 
+// TestJobManager_GetActiveJobs tests retrieving active jobs
+// Main test items:
+// 1. GetActiveJobCount returns correct count of active jobs
+// 2. GetActiveJobs returns list of all active jobs
+// 3. Active jobs list is empty after jobs complete
 func TestJobManager_GetActiveJobs(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -641,6 +726,11 @@ func TestJobManager_GetActiveJobs(t *testing.T) {
 	}
 }
 
+// TestJobManager_Recovery tests job recovery mechanism
+// Main test items:
+// 1. Jobs can be recovered from store after restart
+// 2. Recovered jobs are executed with correct handlers
+// Note: Currently skipped due to internal store access requirement
 func TestJobManager_Recovery(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -662,6 +752,11 @@ func TestJobManager_Recovery(t *testing.T) {
 	t.Skip("Skipping recovery test - requires internal store access")
 }
 
+// TestJobManager_Shutdown tests JobManager shutdown
+// Main test items:
+// 1. Shutdown waits for active jobs to complete
+// 2. New jobs cannot be submitted after shutdown
+// 3. Shutdown completes within timeout
 func TestJobManager_Shutdown(t *testing.T) {
 	manager, _ := setupJobManager(t)
 	// Don't defer cleanup since we're testing shutdown explicitly
@@ -697,6 +792,11 @@ func TestJobManager_Shutdown(t *testing.T) {
 	}
 }
 
+// TestJobManager_HandlerNotFound tests submission without registered handler
+// Main test items:
+// 1. SubmitJob fails when handler is not registered
+// 2. Error message indicates missing handler
+// 3. Job is not stored when handler is missing
 func TestJobManager_HandlerNotFound(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -713,6 +813,11 @@ func TestJobManager_HandlerNotFound(t *testing.T) {
 	}
 }
 
+// TestJobManager_ConcurrentSubmissions tests concurrent job submissions
+// Main test items:
+// 1. Multiple jobs can be submitted concurrently
+// 2. All submitted jobs are executed correctly
+// 3. Job execution count matches submission count
 func TestJobManager_ConcurrentSubmissions(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -789,6 +894,12 @@ func (s *FailingJobStore) UpdateStatus(ctx context.Context, id string, status co
 	return s.MemoryJobStore.UpdateStatus(ctx, id, status, result)
 }
 
+// TestJobManager_RetrySuccess tests retry mechanism with transient failures
+// Main test items:
+// 1. Failed status updates are retried according to retry policy
+// 2. Operation succeeds after retry attempts
+// 3. Job status is correctly updated after successful retry
+// 4. Logger captures retry attempts
 func TestJobManager_RetrySuccess(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -859,6 +970,11 @@ func TestJobManager_RetrySuccess(t *testing.T) {
 	}
 }
 
+// TestJobManager_RetryExhausted tests retry exhaustion scenario
+// Main test items:
+// 1. Error handler is called when all retries are exhausted
+// 2. Error is passed to error handler callback
+// 3. Max retries limit is respected
 func TestJobManager_RetryExhausted(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -928,6 +1044,11 @@ func TestJobManager_RetryExhausted(t *testing.T) {
 	_, _ = manager.GetJob(context.Background(), "job1")
 }
 
+// TestJobManager_RetryPolicyConfiguration tests retry policy configuration
+// Main test items:
+// 1. Default retry policy has correct values
+// 2. Custom retry policy can be set
+// 3. GetRetryPolicy returns configured policy
 func TestJobManager_RetryPolicyConfiguration(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -956,6 +1077,11 @@ func TestJobManager_RetryPolicyConfiguration(t *testing.T) {
 	}
 }
 
+// TestJobManager_NoRetry tests disabling retry behavior
+// Main test items:
+// 1. NoRetry() policy sets MaxRetries to 0
+// 2. Failed operations are not retried
+// 3. Store attempt count is exactly 1 when retry is disabled
 func TestJobManager_NoRetry(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -1004,6 +1130,11 @@ func TestJobManager_NoRetry(t *testing.T) {
 	}
 }
 
+// TestLogger_DefaultLogger tests default logger implementation
+// Main test items:
+// 1. Default logger can be created
+// 2. All log methods (Debug, Info, Warn, Error) work without panic
+// 3. Fields can be passed to log methods
 func TestLogger_DefaultLogger(t *testing.T) {
 	logger := core.NewDefaultLogger()
 
@@ -1014,6 +1145,11 @@ func TestLogger_DefaultLogger(t *testing.T) {
 	logger.Error("error message", core.F("key", "value"))
 }
 
+// TestLogger_NoOpLogger tests no-op logger implementation
+// Main test items:
+// 1. NoOp logger can be created
+// 2. All log methods silently discard output
+// 3. No panic occurs when calling log methods
 func TestLogger_NoOpLogger(t *testing.T) {
 	logger := core.NewNoOpLogger()
 
@@ -1024,6 +1160,11 @@ func TestLogger_NoOpLogger(t *testing.T) {
 	logger.Error("error message", core.F("key", "value"))
 }
 
+// TestRetryPolicy_CalculateDelay tests retry policy field values
+// Main test items:
+// 1. Retry policy fields are set correctly
+// 2. InitialDelay, MaxDelay, and BackoffRatio are stored
+// Note: calculateDelay method is private, so we test field values instead
 func TestRetryPolicy_CalculateDelay(t *testing.T) {
 	policy := core.RetryPolicy{
 		MaxRetries:   5,
@@ -1045,6 +1186,13 @@ func TestRetryPolicy_CalculateDelay(t *testing.T) {
 	}
 }
 
+// TestRetryPolicy_Defaults tests default retry policy values
+// Main test items:
+// 1. DefaultRetryPolicy() returns policy with correct defaults
+// 2. MaxRetries defaults to 3
+// 3. InitialDelay defaults to 100ms
+// 4. MaxDelay defaults to 5 seconds
+// 5. BackoffRatio defaults to 2.0
 func TestRetryPolicy_Defaults(t *testing.T) {
 	policy := core.DefaultRetryPolicy()
 
@@ -1062,6 +1210,10 @@ func TestRetryPolicy_Defaults(t *testing.T) {
 	}
 }
 
+// TestRetryPolicy_NoRetry tests NoRetry helper function
+// Main test items:
+// 1. NoRetry() returns policy with MaxRetries=0
+// 2. Policy can be used to disable retry behavior
 func TestRetryPolicy_NoRetry(t *testing.T) {
 	policy := core.NoRetry()
 
@@ -1074,6 +1226,11 @@ func TestRetryPolicy_NoRetry(t *testing.T) {
 // Context Propagation Tests
 // =============================================================================
 
+// TestJobManager_ContextPropagation_ParentCancelsJob tests parent context cancellation
+// Main test items:
+// 1. Job handler receives parent context
+// 2. Job is cancelled when parent context is cancelled
+// 3. Job status changes to CANCELED
 func TestJobManager_ContextPropagation_ParentCancelsJob(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -1135,6 +1292,11 @@ func TestJobManager_ContextPropagation_ParentCancelsJob(t *testing.T) {
 	}
 }
 
+// TestJobManager_ContextPropagation_ParentTimeout tests parent context timeout
+// Main test items:
+// 1. Job handler respects parent timeout
+// 2. Job is cancelled when parent context times out
+// 3. Job status changes to CANCELED after timeout
 func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -1202,6 +1364,11 @@ func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
 // Duplicate Prevention Tests (Issue #6)
 // =============================================================================
 
+// TestJobManager_DuplicatePrevention_Concurrent tests concurrent duplicate submissions
+// Main test items:
+// 1. Only one concurrent submission succeeds for same job ID
+// 2. Other submissions are rejected with error
+// 3. Exactly one handler execution occurs
 func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -1260,6 +1427,11 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 	close(unblockHandler)
 }
 
+// TestJobManager_DuplicatePrevention_Sequential tests sequential duplicate submissions
+// Main test items:
+// 1. Second submission with same ID is rejected
+// 2. First job continues normally
+// 3. Error is returned for duplicate submission
 func TestJobManager_DuplicatePrevention_Sequential(t *testing.T) {
 	manager, cleanup := setupJobManager(t)
 	defer cleanup()
@@ -1296,6 +1468,12 @@ func TestJobManager_DuplicatePrevention_Sequential(t *testing.T) {
 	close(unblock)
 }
 
+// TestJobManager_DuplicatePrevention_DatabaseLevel tests database-level duplicate check
+// Main test items:
+// 1. Duplicate is detected even if not in activeJobs map
+// 2. Existing PENDING job in database is protected
+// 3. Handler is NOT called for duplicate job
+// 4. Original job status remains unchanged
 func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 	// This test verifies that the database-level duplicate check works
 	// by simulating a scenario where a job exists in DB but not in activeJobs
@@ -1373,6 +1551,10 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 // JSONSerializer.Name() Test
 // =============================================================================
 
+// TestJSONSerializer_Name tests serializer name method
+// Main test items:
+// 1. Name() returns "json" for JSONSerializer
+// 2. Name can be used for serializer identification
 func TestJSONSerializer_Name(t *testing.T) {
 	serializer := core.NewJSONSerializer()
 
@@ -1386,6 +1568,11 @@ func TestJSONSerializer_Name(t *testing.T) {
 // NoOpLogger Methods Test (Explicit Call Coverage)
 // =============================================================================
 
+// TestNoOpLogger_ExplicitCoverage tests explicit NoOpLogger method calls
+// Main test items:
+// 1. All log methods can be called with multiple fields
+// 2. Methods handle variadic field arguments correctly
+// 3. No panic occurs with multiple field arguments
 func TestNoOpLogger_ExplicitCoverage(t *testing.T) {
 	logger := core.NewNoOpLogger()
 
@@ -1402,6 +1589,11 @@ func TestNoOpLogger_ExplicitCoverage(t *testing.T) {
 // JobManager.ListJobs() Tests
 // =============================================================================
 
+// TestJobManager_ListJobs_FilterByStatus tests listing jobs with status filter
+// Main test items:
+// 1. Jobs can be filtered by status
+// 2. Only jobs matching status are returned
+// 3. Count of filtered jobs is correct
 func TestJobManager_ListJobs_FilterByStatus(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -1444,6 +1636,11 @@ func TestJobManager_ListJobs_FilterByStatus(t *testing.T) {
 	}
 }
 
+// TestJobManager_ListJobs_FilterByType tests listing jobs with type filter
+// Main test items:
+// 1. Jobs can be filtered by type
+// 2. Only jobs matching type are returned
+// 3. Count of filtered jobs is correct
 func TestJobManager_ListJobs_FilterByType(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -1486,6 +1683,11 @@ func TestJobManager_ListJobs_FilterByType(t *testing.T) {
 	}
 }
 
+// TestJobManager_ListJobs_WithLimitAndOffset tests listing jobs with pagination
+// Main test items:
+// 1. Limit parameter restricts number of jobs returned
+// 2. Offset parameter skips first N jobs
+// 3. Pagination works correctly for job listing
 func TestJobManager_ListJobs_WithLimitAndOffset(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -1535,6 +1737,11 @@ func TestJobManager_ListJobs_WithLimitAndOffset(t *testing.T) {
 // JobManager.Start() Recovery Tests
 // =============================================================================
 
+// TestJobManager_Start_RecoveryFromPendingJobs tests recovery on startup
+// Main test items:
+// 1. Pending jobs from previous run are recovered on Start()
+// 2. Recovered jobs are executed with registered handlers
+// 3. Job status changes to COMPLETED after recovery execution
 func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
@@ -1603,6 +1810,11 @@ func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 	manager.Shutdown(shutdownCtx)
 }
 
+// TestJobManager_Start_ConvertsRunningToFailed tests handling orphaned RUNNING jobs
+// Main test items:
+// 1. Jobs in RUNNING status on startup are marked as FAILED
+// 2. Failure reason is "Interrupted by restart"
+// 3. Orphaned jobs are not re-executed
 func TestJobManager_Start_ConvertsRunningToFailed(t *testing.T) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())

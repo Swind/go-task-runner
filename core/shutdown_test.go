@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// TestSequencedTaskRunner_Shutdown tests basic shutdown functionality
+// Main test items:
+// 1. Runner starts with IsClosed() returning false
+// 2. Shutdown() sets IsClosed() to true
 func TestSequencedTaskRunner_Shutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -28,6 +32,11 @@ func TestSequencedTaskRunner_Shutdown(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_ClearsPendingTasks tests shutdown clears pending tasks
+// Main test items:
+// 1. Pending tasks in queue are cleared on shutdown
+// 2. Currently executing task may complete
+// 3. Tasks after shutdown are rejected
 func TestSequencedTaskRunner_Shutdown_ClearsPendingTasks(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -60,6 +69,11 @@ func TestSequencedTaskRunner_Shutdown_ClearsPendingTasks(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks tests shutdown stops repeating tasks
+// Main test items:
+// 1. Repeating tasks stop executing after shutdown
+// 2. Handle.IsStopped() returns true
+// 3. Repeating task handle still works after shutdown
 func TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -100,6 +114,10 @@ func TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks tests shutdown with multiple repeating tasks
+// Main test items:
+// 1. All repeating tasks stop after shutdown
+// 2. Multiple repeating tasks are handled correctly
 func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -146,6 +164,11 @@ func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_WithDelayedTasks tests shutdown with delayed tasks
+// Main test items:
+// 1. Delayed tasks are handled on shutdown
+// 2. Tasks in DelayManager may still execute
+// 3. Pending delayed tasks are not posted to closed runner
 func TestSequencedTaskRunner_Shutdown_WithDelayedTasks(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -172,6 +195,10 @@ func TestSequencedTaskRunner_Shutdown_WithDelayedTasks(t *testing.T) {
 	// This is acceptable behavior
 }
 
+// TestSequencedTaskRunner_Shutdown_Idempotent tests shutdown idempotence
+// Main test items:
+// 1. Multiple Shutdown() calls are safe
+// 2. IsClosed() returns true after any number of calls
 func TestSequencedTaskRunner_Shutdown_Idempotent(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -189,6 +216,10 @@ func TestSequencedTaskRunner_Shutdown_Idempotent(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_Shutdown_ConcurrentShutdown tests concurrent shutdown calls
+// Main test items:
+// 1. Multiple concurrent Shutdown() calls are safe
+// 2. All calls complete without panic
 func TestSequencedTaskRunner_Shutdown_ConcurrentShutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -223,6 +254,10 @@ func TestSequencedTaskRunner_Shutdown_ConcurrentShutdown(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown tests shutdown with delayed repeating task
+// Main test items:
+// 1. Repeating task with initial delay is stopped on shutdown
+// 2. Task never executes if shutdown before initial delay
 func TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()

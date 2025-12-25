@@ -11,6 +11,11 @@ import (
 // WaitIdle Tests
 // =============================================================================
 
+// TestSequencedTaskRunner_WaitIdle tests WaitIdle for SequencedTaskRunner
+// Main test items:
+// 1. WaitIdle blocks until all tasks complete
+// 2. Returns nil when all tasks are done
+// 3. All tasks execute successfully
 func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -42,6 +47,10 @@ func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_WaitIdle_Timeout tests WaitIdle timeout behavior
+// Main test items:
+// 1. WaitIdle returns context.DeadlineExceeded on timeout
+// 2. Long-running task causes timeout
 func TestSequencedTaskRunner_WaitIdle_Timeout(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -67,6 +76,10 @@ func TestSequencedTaskRunner_WaitIdle_Timeout(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_WaitIdle_AfterShutdown tests WaitIdle after shutdown
+// Main test items:
+// 1. WaitIdle returns error when runner is closed
+// 2. Shutdown prevents waiting
 func TestSequencedTaskRunner_WaitIdle_AfterShutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -81,6 +94,11 @@ func TestSequencedTaskRunner_WaitIdle_AfterShutdown(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_WaitIdle tests WaitIdle for SingleThreadTaskRunner
+// Main test items:
+// 1. WaitIdle blocks until all tasks complete
+// 2. Returns nil when all tasks are done
+// 3. All tasks execute successfully on single thread
 func TestSingleThreadTaskRunner_WaitIdle(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -113,6 +131,11 @@ func TestSingleThreadTaskRunner_WaitIdle(t *testing.T) {
 // FlushAsync Tests
 // =============================================================================
 
+// TestSequencedTaskRunner_FlushAsync tests FlushAsync for SequencedTaskRunner
+// Main test items:
+// 1. FlushAsync callback is called after all tasks complete
+// 2. Callback executes on the runner's sequence
+// 3. All tasks complete before callback
 func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -147,6 +170,11 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_FlushAsync tests FlushAsync for SingleThreadTaskRunner
+// Main test items:
+// 1. FlushAsync callback is called after all tasks complete
+// 2. Callback executes on the dedicated thread
+// 3. All tasks complete before callback
 func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -182,6 +210,11 @@ func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
 // WaitShutdown Tests
 // =============================================================================
 
+// TestSequencedTaskRunner_WaitShutdown_External tests external shutdown notification
+// Main test items:
+// 1. WaitShutdown unblocks when Shutdown is called
+// 2. Returns nil when shutdown is triggered
+// 3. External Shutdown() call wakes up waiters
 func TestSequencedTaskRunner_WaitShutdown_External(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -212,6 +245,11 @@ func TestSequencedTaskRunner_WaitShutdown_External(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_WaitShutdown_Internal tests internal shutdown notification
+// Main test items:
+// 1. WaitShutdown unblocks when task calls Shutdown
+// 2. Shutdown can be triggered from within a task
+// 3. Task can self-initiate shutdown
 func TestSequencedTaskRunner_WaitShutdown_Internal(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -263,6 +301,11 @@ func TestSequencedTaskRunner_WaitShutdown_Internal(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_WaitShutdown_Internal tests internal shutdown for SingleThreadTaskRunner
+// Main test items:
+// 1. WaitShutdown unblocks when task calls Shutdown
+// 2. Shutdown can be triggered from within a task
+// 3. Task can self-initiate shutdown on dedicated thread
 func TestSingleThreadTaskRunner_WaitShutdown_Internal(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
@@ -300,6 +343,10 @@ func TestSingleThreadTaskRunner_WaitShutdown_Internal(t *testing.T) {
 	runner.Stop()
 }
 
+// TestSequencedTaskRunner_WaitShutdown_Timeout tests WaitShutdown timeout behavior
+// Main test items:
+// 1. WaitShutdown returns context.DeadlineExceeded on timeout
+// 2. Timeout occurs when no shutdown is triggered
 func TestSequencedTaskRunner_WaitShutdown_Timeout(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -326,6 +373,11 @@ func TestSequencedTaskRunner_WaitShutdown_Timeout(t *testing.T) {
 // Integration Tests
 // =============================================================================
 
+// TestSequencedTaskRunner_WaitIdle_ThenShutdown tests WaitIdle followed by Shutdown
+// Main test items:
+// 1. WaitIdle completes when all tasks are done
+// 2. Shutdown can be called after WaitIdle
+// 3. WaitShutdown completes after Shutdown
 func TestSequencedTaskRunner_WaitIdle_ThenShutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -365,6 +417,11 @@ func TestSequencedTaskRunner_WaitIdle_ThenShutdown(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_MultipleWaitShutdown tests multiple WaitShutdown calls
+// Main test items:
+// 1. Multiple goroutines can wait for shutdown
+// 2. All waiters are unblocked on Shutdown
+// 3. All WaitShutdown calls return nil
 func TestSequencedTaskRunner_MultipleWaitShutdown(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -401,6 +458,10 @@ func TestSequencedTaskRunner_MultipleWaitShutdown(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_MultipleShutdownCalls tests multiple Shutdown calls
+// Main test items:
+// 1. Multiple Shutdown() calls are safe (idempotent)
+// 2. IsClosed() returns true after first call
 func TestSequencedTaskRunner_MultipleShutdownCalls(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -418,6 +479,10 @@ func TestSequencedTaskRunner_MultipleShutdownCalls(t *testing.T) {
 	}
 }
 
+// TestSingleThreadTaskRunner_MultipleShutdownCalls tests multiple Shutdown calls for SingleThreadTaskRunner
+// Main test items:
+// 1. Multiple Shutdown() calls are safe (idempotent)
+// 2. IsClosed() returns true after first call
 func TestSingleThreadTaskRunner_MultipleShutdownCalls(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 

@@ -13,36 +13,55 @@ import (
 // Ensure GoroutineThreadPool fully implements ThreadPool interface
 var _ core.ThreadPool = (*GoroutineThreadPool)(nil)
 
+// TestGoroutineThreadPool_Lifecycle verifies pool state transitions through its lifecycle
+// Given: A newly created GoroutineThreadPool with 2 workers
+// When: The pool is started and then stopped
+// Then: Pool correctly transitions between stopped and running states
 func TestGoroutineThreadPool_Lifecycle(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("test-pool", 2)
+	expectedID := "test-pool"
+	expectedWorkers := 2
 
-	if pool.ID() != "test-pool" {
-		t.Errorf("expected ID 'test-pool', got %s", pool.ID())
+	// Act - Verify initial state
+	if pool.ID() != expectedID {
+		t.Errorf("ID() = %q, want %q", pool.ID(), expectedID)
 	}
 
+	// Assert - Not running initially
 	if pool.IsRunning() {
-		t.Error("pool should not be running initially")
+		t.Error("IsRunning() = true, want false (pool should not be running initially)")
 	}
 
+	// Act - Start the pool
 	ctx := context.Background()
 	pool.Start(ctx)
 
+	// Assert - Running after Start()
 	if !pool.IsRunning() {
-		t.Error("pool should be running after Start()")
+		t.Error("IsRunning() = false, want true (pool should be running after Start())")
 	}
 
-	if pool.WorkerCount() != 2 {
-		t.Errorf("expected 2 workers, got %d", pool.WorkerCount())
+	// Assert - Worker count matches configuration
+	if pool.WorkerCount() != expectedWorkers {
+		t.Errorf("WorkerCount() = %d, want %d", pool.WorkerCount(), expectedWorkers)
 	}
 
+	// Act - Stop the pool
 	pool.Stop()
 
+	// Assert - Not running after Stop()
 	if pool.IsRunning() {
-		t.Error("pool should not be running after Stop()")
+		t.Error("IsRunning() = true, want false (pool should not be running after Stop())")
 	}
 }
 
+// TestGoroutineThreadPool_TaskExecution verifies concurrent task execution
+// Given: A running pool with 4 workers and 10 tasks to execute
+// When: All tasks are submitted to the pool
+// Then: All tasks execute exactly once
 func TestGoroutineThreadPool_TaskExecution(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("exec-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -50,7 +69,6 @@ func TestGoroutineThreadPool_TaskExecution(t *testing.T) {
 	var counter int32
 	var wg sync.WaitGroup
 	taskCount := 10
-
 	wg.Add(taskCount)
 
 	task := func(ctx context.Context) {
@@ -59,24 +77,32 @@ func TestGoroutineThreadPool_TaskExecution(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Simulate work
 	}
 
+	// Act - Submit all tasks
 	for i := 0; i < taskCount; i++ {
-		// We use PostInternal to simulate task submission via the interface
 		pool.PostInternal(task, core.TaskTraits{})
 	}
 
+	// Wait for completion
 	wg.Wait()
 
-	if val := atomic.LoadInt32(&counter); val != int32(taskCount) {
-		t.Errorf("expected %d executed tasks, got %d", taskCount, val)
+	// Assert - All tasks executed
+	got := atomic.LoadInt32(&counter)
+	if got != int32(taskCount) {
+		t.Errorf("executed tasks = %d, want %d", got, taskCount)
 	}
 }
 
+// TestGoroutineThreadPool_Metrics verifies real-time task tracking metrics
+// Given: A single-worker pool with blocking and queued tasks
+// When: Tasks are submitted and executed
+// Then: ActiveTaskCount and QueuedTaskCount accurately reflect pool state
 func TestGoroutineThreadPool_Metrics(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("metrics-pool", 1) // Single worker to force queuing
 	pool.Start(context.Background())
 	defer pool.Stop()
 
-	// 1. Block the worker
+	// Arrange - Create a blocking task
 	blockCh := make(chan struct{})
 	bgDone := make(chan struct{})
 
@@ -85,38 +111,36 @@ func TestGoroutineThreadPool_Metrics(t *testing.T) {
 		bgDone <- struct{}{}
 	}
 
+	// Act - Submit blocking task
 	pool.PostInternal(blockingTask, core.TaskTraits{})
+	time.Sleep(50 * time.Millisecond) // Wait for worker to pick it up
 
-	// Wait a bit for worker to pick it up
-	time.Sleep(50 * time.Millisecond)
-
+	// Assert - One active task
 	if active := pool.ActiveTaskCount(); active != 1 {
-		t.Errorf("expected 1 active task, got %d", active)
+		t.Errorf("ActiveTaskCount() = %d, want 1", active)
 	}
 
-	// 2. Queue more tasks
+	// Act - Queue more tasks while worker is blocked
 	pool.PostInternal(func(ctx context.Context) {}, core.TaskTraits{})
 	pool.PostInternal(func(ctx context.Context) {}, core.TaskTraits{})
+	time.Sleep(10 * time.Millisecond) // Wait for queue update
 
-	// Wait for queue update
-	time.Sleep(10 * time.Millisecond)
-
+	// Assert - Two tasks queued
 	if queued := pool.QueuedTaskCount(); queued != 2 {
-		t.Errorf("expected 2 queued tasks, got %d", queued)
+		t.Errorf("QueuedTaskCount() = %d, want 2", queued)
 	}
 
-	// 3. Unblock
+	// Act - Unblock and drain
 	close(blockCh)
 	<-bgDone
+	time.Sleep(100 * time.Millisecond) // Wait for drain
 
-	// Wait for drain
-	time.Sleep(100 * time.Millisecond)
-
+	// Assert - No active or queued tasks
 	if active := pool.ActiveTaskCount(); active != 0 {
-		t.Errorf("expected 0 active tasks, got %d", active)
+		t.Errorf("ActiveTaskCount() = %d, want 0", active)
 	}
 	if queued := pool.QueuedTaskCount(); queued != 0 {
-		t.Errorf("expected 0 queued tasks, got %d", queued)
+		t.Errorf("QueuedTaskCount() = %d, want 0", queued)
 	}
 }
 
@@ -124,47 +148,56 @@ func TestGoroutineThreadPool_Metrics(t *testing.T) {
 // Graceful Shutdown Tests
 // =============================================================================
 
+// TestGoroutineThreadPool_StopGraceful_EmptyQueue verifies shutdown with no pending work
+// Given: A running pool with an empty task queue
+// When: StopGraceful is called
+// Then: Pool stops immediately without error
 func TestGoroutineThreadPool_StopGraceful_EmptyQueue(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("graceful-pool", 2)
 	pool.Start(context.Background())
 
-	// No tasks queued, should stop immediately
+	// Act - Shutdown with no queued tasks
 	err := pool.StopGraceful(1 * time.Second)
+
+	// Assert - No error occurred
 	if err != nil {
-		t.Fatalf("StopGraceful failed: %v", err)
+		t.Fatalf("StopGraceful() unexpected error: %v", err)
 	}
 
+	// Assert - Pool is stopped
 	if pool.IsRunning() {
-		t.Error("pool should not be running after StopGraceful")
+		t.Error("IsRunning() = true, want false (pool should not be running after StopGraceful)")
 	}
 }
 
+// TestGoroutineThreadPool_StopGraceful_WithQueuedTasks verifies graceful shutdown completes queued work
+// Given: A running pool with queued tasks
+// When: StopGraceful is called
+// Then: All queued tasks complete before pool stops
 func TestGoroutineThreadPool_StopGraceful_WithQueuedTasks(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("graceful-queued-pool", 2)
 	pool.Start(context.Background())
 
 	var executed int32
 	var wg sync.WaitGroup
 	taskCount := 5
-
 	wg.Add(taskCount)
 
-	// Create tasks that complete quickly
 	task := func(ctx context.Context) {
 		defer wg.Done()
 		time.Sleep(20 * time.Millisecond)
 		atomic.AddInt32(&executed, 1)
 	}
 
-	// Submit all tasks
+	// Act - Submit all tasks
 	for i := 0; i < taskCount; i++ {
 		pool.PostInternal(task, core.TaskTraits{})
 	}
+	time.Sleep(10 * time.Millisecond) // Wait for tasks to start
 
-	// Wait a bit for tasks to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Start graceful shutdown in background
+	// Act - Start graceful shutdown in background
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- pool.StopGraceful(1 * time.Second)
@@ -173,34 +206,38 @@ func TestGoroutineThreadPool_StopGraceful_WithQueuedTasks(t *testing.T) {
 	// Wait for all tasks to complete
 	wg.Wait()
 
-	// Wait for shutdown to complete
+	// Assert - Shutdown completes without error
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Errorf("StopGraceful failed: %v", err)
+			t.Errorf("StopGraceful() unexpected error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("StopGraceful timed out")
+		t.Error("StopGraceful() timed out after 2 seconds")
 	}
 
-	// Verify all tasks were executed
+	// Assert - All tasks were executed
 	if executed != int32(taskCount) {
-		t.Errorf("expected %d executed tasks, got %d", taskCount, executed)
+		t.Errorf("executed tasks = %d, want %d", executed, taskCount)
 	}
 
+	// Assert - Pool is stopped
 	if pool.IsRunning() {
-		t.Error("pool should not be running after StopGraceful")
+		t.Error("IsRunning() = true, want false (pool should not be running after StopGraceful)")
 	}
 }
 
+// TestGoroutineThreadPool_StopGraceful_Timeout verifies timeout behavior during shutdown
+// Given: A pool with a long-running task that exceeds shutdown timeout
+// When: StopGraceful is called with short timeout
+// Then: Returns timeout error and pool stops anyway
 func TestGoroutineThreadPool_StopGraceful_Timeout(t *testing.T) {
+	// Arrange
 	pool := NewGoroutineThreadPool("timeout-pool", 1)
 	pool.Start(context.Background())
 
-	// Create a task that blocks longer than the shutdown timeout
-	// The task checks context and should exit when context is cancelled
+	// Arrange - Create task that respects context cancellation
 	longRunningTask := func(ctx context.Context) {
-		// Block for 500ms, but check context
 		select {
 		case <-time.After(500 * time.Millisecond):
 			// Task completes normally
@@ -211,71 +248,79 @@ func TestGoroutineThreadPool_StopGraceful_Timeout(t *testing.T) {
 	}
 
 	pool.PostInternal(longRunningTask, core.TaskTraits{})
+	time.Sleep(20 * time.Millisecond) // Wait for task to start
 
-	// Wait for task to start
-	time.Sleep(20 * time.Millisecond)
-
-	// Shutdown with 50ms timeout - task takes 500ms so this should timeout
+	// Act - Shutdown with 50ms timeout (task takes 500ms)
 	start := time.Now()
 	err := pool.StopGraceful(50 * time.Millisecond)
 	elapsed := time.Since(start)
 
+	// Assert - Timeout error occurred
 	if err == nil {
-		t.Error("expected timeout error, got nil")
+		t.Error("StopGraceful() error = nil, want timeout error")
 	}
 
-	// StopGraceful should return in roughly 50-100ms (timeout + one ticker interval)
-	// NOT 500ms (the task duration) because context cancellation should interrupt the task
+	// Assert - Shutdown completed quickly (not after full 500ms task duration)
 	if elapsed > 200*time.Millisecond {
-		t.Errorf("StopGraceful took too long: %v (expected ~50-100ms)", elapsed)
+		t.Errorf("StopGraceful() took %v, want ~50-100ms (context cancellation should interrupt task)", elapsed)
 	}
 
+	// Assert - Pool is stopped
 	if pool.IsRunning() {
-		t.Error("pool should not be running after timeout StopGraceful")
+		t.Error("IsRunning() = true, want false (pool should not be running after timeout)")
 	}
 }
 
+// TestGoroutineThreadPool_StopImmediateVsGraceful compares immediate and graceful shutdown behaviors
+// Given: Two pools with queued tasks
+// When: One pool uses Stop() and the other uses StopGraceful()
+// Then: Stop() clears queue immediately, StopGraceful() waits for tasks
 func TestGoroutineThreadPool_StopImmediateVsGraceful(t *testing.T) {
-	// Test immediate stop
-	p1 := NewGoroutineThreadPool("immediate-pool", 1)
-	p1.Start(context.Background())
+	t.Run("immediate stop clears queue", func(t *testing.T) {
+		// Arrange
+		p1 := NewGoroutineThreadPool("immediate-pool", 1)
+		p1.Start(context.Background())
 
-	// Add some tasks
-	for i := 0; i < 5; i++ {
-		p1.PostInternal(func(ctx context.Context) {
-			time.Sleep(100 * time.Millisecond)
-		}, core.TaskTraits{})
-	}
+		// Add tasks that won't complete immediately
+		for i := 0; i < 5; i++ {
+			p1.PostInternal(func(ctx context.Context) {
+				time.Sleep(100 * time.Millisecond)
+			}, core.TaskTraits{})
+		}
 
-	// Immediate stop - should clear queue immediately
-	p1.Stop()
+		// Act - Immediate stop
+		p1.Stop()
 
-	if p1.QueuedTaskCount() != 0 {
-		// Queue should be cleared (but may not be 0 if tasks were picked up)
-		// This depends on timing, so we just check that Stop() doesn't hang
-	}
+		// Assert - Queue is cleared (Stop should not hang)
+		// Note: QueuedTaskCount may be >0 if tasks were picked up before Stop cleared queue
+		// The key assertion is that Stop() returns immediately
+	})
 
-	// Test graceful stop
-	p2 := NewGoroutineThreadPool("graceful-pool", 2)
-	p2.Start(context.Background())
+	t.Run("graceful stop waits for tasks", func(t *testing.T) {
+		// Arrange
+		p2 := NewGoroutineThreadPool("graceful-pool", 2)
+		p2.Start(context.Background())
 
-	var executed int32
-	for i := 0; i < 3; i++ {
-		p2.PostInternal(func(ctx context.Context) {
-			time.Sleep(10 * time.Millisecond)
-			atomic.AddInt32(&executed, 1)
-		}, core.TaskTraits{})
-	}
+		var executed int32
+		for i := 0; i < 3; i++ {
+			p2.PostInternal(func(ctx context.Context) {
+				time.Sleep(10 * time.Millisecond)
+				atomic.AddInt32(&executed, 1)
+			}, core.TaskTraits{})
+		}
 
-	// Wait for tasks to complete, then shutdown
-	time.Sleep(100 * time.Millisecond)
-	err := p2.StopGraceful(500 * time.Millisecond)
-	if err != nil {
-		t.Errorf("StopGraceful failed: %v", err)
-	}
+		// Act - Wait for tasks to complete, then shutdown
+		time.Sleep(100 * time.Millisecond)
+		err := p2.StopGraceful(500 * time.Millisecond)
 
-	// All tasks should have been executed
-	if executed != 3 {
-		t.Errorf("expected 3 executed tasks, got %d", executed)
-	}
+		// Assert - No error
+		if err != nil {
+			t.Errorf("StopGraceful() unexpected error: %v", err)
+		}
+
+		// Assert - All tasks executed
+		if executed != 3 {
+			t.Errorf("executed tasks = %d, want 3", executed)
+		}
+	})
 }

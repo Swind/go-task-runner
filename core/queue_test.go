@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+// TestPriorityTaskQueue_Stability tests priority queue stability
+// Main test items:
+// 1. Verifies tasks execute in priority order (UserBlocking > UserVisible > BestEffort)
+// 2. Verifies same-priority tasks execute in FIFO order
+// 3. Confirms queue behaves correctly with mixed priority tasks
 func TestPriorityTaskQueue_Stability(t *testing.T) {
 	q := NewPriorityTaskQueue()
 
@@ -52,6 +57,12 @@ func TestPriorityTaskQueue_Stability(t *testing.T) {
 	}
 }
 
+// TestPriorityTaskQueue_PopUpTo tests batch task retrieval
+// Main test items:
+// 1. Verifies PopUpTo retrieves the specified number of tasks
+// 2. Confirms retrieved tasks are sorted by priority
+// 3. Verifies retrieved tasks are removed from queue
+// 4. Confirms remaining tasks stay in queue
 func TestPriorityTaskQueue_PopUpTo(t *testing.T) {
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -87,6 +98,12 @@ func TestPriorityTaskQueue_PopUpTo(t *testing.T) {
 	}
 }
 
+// TestPriorityTaskQueue_PeekTraits tests peeking at queue head task traits
+// Main test items:
+// 1. Verifies empty queue Peek returns false
+// 2. Confirms Peek correctly returns head task traits
+// 3. Verifies Peek does not remove task (non-destructive read)
+// 4. Confirms queue length unchanged after Peek
 func TestPriorityTaskQueue_PeekTraits(t *testing.T) {
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -116,6 +133,12 @@ func TestPriorityTaskQueue_PeekTraits(t *testing.T) {
 	}
 }
 
+// TestPriorityTaskQueue_MaybeCompact tests memory compaction
+// Main test items:
+// 1. Verifies MaybeCompact can be called after emptying queue
+// 2. Confirms queue remains functional after compaction
+// 3. Verifies compaction doesn't affect basic operations (Push/Pop)
+// Note: For Heap implementation, MaybeCompact may be a no-op (heap auto-manages memory)
 func TestPriorityTaskQueue_MaybeCompact(t *testing.T) {
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -151,6 +174,11 @@ func TestPriorityTaskQueue_MaybeCompact(t *testing.T) {
 	}
 }
 
+// TestFIFOTaskQueue_FIFO tests FIFO queue first-in-first-out behavior
+// Main test items:
+// 1. Verifies tasks execute in insertion order (FIFO)
+// 2. Confirms priority doesn't affect execution order (FIFO queue characteristic)
+// 3. Confirms queue correctly maintains insertion order
 func TestFIFOTaskQueue_FIFO(t *testing.T) {
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -179,8 +207,12 @@ func TestFIFOTaskQueue_FIFO(t *testing.T) {
 	}
 }
 
-// TestPriorityTaskQueue_SequenceOverflow tests the defensive overflow handling
-// While uint64 overflow is practically impossible, this test verifies the logic
+// TestPriorityTaskQueue_SequenceOverflow tests sequence overflow protection
+// Main test items:
+// 1. Simulates uint64 sequence reaching maximum value edge case
+// 2. Verifies sequence resets to 0 when queue is empty
+// 3. Confirms queue operates normally after reset
+// Note: uint64 overflow is practically impossible, this verifies defensive programming
 func TestPriorityTaskQueue_SequenceOverflow(t *testing.T) {
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -234,6 +266,11 @@ func TestPriorityTaskQueue_SequenceOverflow(t *testing.T) {
 	}
 }
 
+// TestFIFOTaskQueue_PopUpTo tests FIFO queue batch retrieval
+// Main test items:
+// 1. Verifies PopUpTo retrieves specified number of tasks
+// 2. Confirms retrieved tasks are in FIFO order
+// 3. Verifies behavior when requesting more tasks than available
 func TestFIFOTaskQueue_PopUpTo(t *testing.T) {
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -262,6 +299,11 @@ func TestFIFOTaskQueue_PopUpTo(t *testing.T) {
 	}
 }
 
+// TestFIFOTaskQueue_MaybeCompact tests FIFO queue memory compaction
+// Main test items:
+// 1. Verifies MaybeCompact can be called after emptying queue
+// 2. Confirms underlying slice capacity is reduced after compaction
+// 3. Verifies compaction doesn't affect basic queue operations
 func TestFIFOTaskQueue_MaybeCompact(t *testing.T) {
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}

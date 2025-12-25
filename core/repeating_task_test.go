@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// TestRepeatingTask_BasicExecution tests basic repeating task functionality
+// Main test items:
+// 1. Repeating task executes multiple times
+// 2. Stop() prevents further executions
+// 3. IsStopped() returns true after Stop()
 func TestRepeatingTask_BasicExecution(t *testing.T) {
 	// Create a simple in-memory thread pool for testing
 	pool := newTestThreadPool()
@@ -50,6 +55,11 @@ func TestRepeatingTask_BasicExecution(t *testing.T) {
 	}
 }
 
+// TestRepeatingTask_WithInitialDelay tests repeating task with initial delay
+// Main test items:
+// 1. Initial delay is respected before first execution
+// 2. Task continues to execute after initial delay
+// 3. Interval is used after initial delay
 func TestRepeatingTask_WithInitialDelay(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -93,6 +103,10 @@ func TestRepeatingTask_WithInitialDelay(t *testing.T) {
 	}
 }
 
+// TestRepeatingTask_WithTraits tests repeating task with custom traits
+// Main test items:
+// 1. Repeating task respects task traits (priority)
+// 2. Task executes multiple times with custom traits
 func TestRepeatingTask_WithTraits(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -120,6 +134,10 @@ func TestRepeatingTask_WithTraits(t *testing.T) {
 	}
 }
 
+// TestRepeatingTask_StopBeforeFirstExecution tests stopping before execution
+// Main test items:
+// 1. Stop() called before first execution prevents execution
+// 2. IsStopped() returns true immediately
 func TestRepeatingTask_StopBeforeFirstExecution(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -149,6 +167,11 @@ func TestRepeatingTask_StopBeforeFirstExecution(t *testing.T) {
 	}
 }
 
+// TestRepeatingTask_ConcurrentStop tests concurrent Stop() calls
+// Main test items:
+// 1. Multiple concurrent Stop() calls are safe
+// 2. All calls succeed without panic
+// 3. IsStopped() returns true after all calls complete
 func TestRepeatingTask_ConcurrentStop(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
@@ -180,6 +203,10 @@ func TestRepeatingTask_ConcurrentStop(t *testing.T) {
 	}
 }
 
+// TestRepeatingTask_ContextPropagation tests context propagation to repeating tasks
+// Main test items:
+// 1. TaskRunner is available in task context
+// 2. Context is properly propagated to each execution
 func TestRepeatingTask_ContextPropagation(t *testing.T) {
 	pool := newTestThreadPool()
 	pool.start()
