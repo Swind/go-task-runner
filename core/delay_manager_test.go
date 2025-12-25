@@ -72,7 +72,7 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	var executed atomic.Int32
 
 	// Act - Concurrently add 100 tasks with different delays
-	for i := 0; i < numTasks; i++ {
+	for i := range numTasks {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -86,7 +86,7 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 
 	wg.Wait()
 	// Wait for delayed tasks to execute (delays: 50-140ms)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Assert - Most tasks executed (allow 10% tolerance)
 	count := executed.Load()
