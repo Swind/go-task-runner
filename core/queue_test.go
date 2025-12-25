@@ -52,6 +52,105 @@ func TestPriorityTaskQueue_Stability(t *testing.T) {
 	}
 }
 
+func TestPriorityTaskQueue_PopUpTo(t *testing.T) {
+	q := NewPriorityTaskQueue()
+	noop := func(ctx context.Context) {}
+
+	// Push 5 tasks with different priorities
+	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
+	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
+
+	// Pop up to 3 tasks (should get highest priority ones first)
+	tasks := q.PopUpTo(3)
+
+	if len(tasks) != 3 {
+		t.Errorf("Expected 3 tasks, got %d", len(tasks))
+	}
+
+	// First 2 should be UserBlocking, then UserVisible
+	if tasks[0].Traits.Priority != TaskPriorityUserBlocking {
+		t.Errorf("Expected first task to be UserBlocking, got %d", tasks[0].Traits.Priority)
+	}
+	if tasks[1].Traits.Priority != TaskPriorityUserBlocking {
+		t.Errorf("Expected second task to be UserBlocking, got %d", tasks[1].Traits.Priority)
+	}
+	if tasks[2].Traits.Priority != TaskPriorityUserVisible {
+		t.Errorf("Expected third task to be UserVisible, got %d", tasks[2].Traits.Priority)
+	}
+
+	// Queue should still have 2 remaining BestEffort tasks
+	if q.Len() != 2 {
+		t.Errorf("Expected 2 remaining tasks, got %d", q.Len())
+	}
+}
+
+func TestPriorityTaskQueue_PeekTraits(t *testing.T) {
+	q := NewPriorityTaskQueue()
+	noop := func(ctx context.Context) {}
+
+	// Empty queue - should return false
+	_, ok := q.PeekTraits()
+	if ok {
+		t.Error("Expected false for empty queue")
+	}
+
+	// Push a task with specific traits
+	traits := TaskTraits{Priority: TaskPriorityUserBlocking}
+	q.Push(noop, traits)
+
+	// Peek should return the traits
+	peekedTraits, ok := q.PeekTraits()
+	if !ok {
+		t.Fatal("Expected true for non-empty queue")
+	}
+	if peekedTraits.Priority != TaskPriorityUserBlocking {
+		t.Errorf("Expected priority UserBlocking, got %d", peekedTraits.Priority)
+	}
+
+	// Queue should still have the task (Peek doesn't remove)
+	if q.Len() != 1 {
+		t.Errorf("Expected 1 task after peek, got %d", q.Len())
+	}
+}
+
+func TestPriorityTaskQueue_MaybeCompact(t *testing.T) {
+	q := NewPriorityTaskQueue()
+	noop := func(ctx context.Context) {}
+
+	// Push 10 tasks
+	for i := 0; i < 10; i++ {
+		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
+	}
+
+	// Pop all tasks
+	for i := 0; i < 10; i++ {
+		q.Pop()
+	}
+
+	// Queue should have empty slice with capacity > 0
+	// MaybeCompact should reduce the capacity
+	q.MaybeCompact()
+
+	// Push a new task - should still work
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
+
+	if q.Len() != 1 {
+		t.Errorf("Expected 1 task after MaybeCompact, got %d", q.Len())
+	}
+
+	// Verify it can still pop
+	item, ok := q.Pop()
+	if !ok {
+		t.Error("Failed to pop task after MaybeCompact")
+	}
+	if item.Traits.Priority != TaskPriorityUserVisible {
+		t.Errorf("Expected priority UserVisible, got %d", item.Traits.Priority)
+	}
+}
+
 func TestFIFOTaskQueue_FIFO(t *testing.T) {
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
@@ -132,5 +231,67 @@ func TestPriorityTaskQueue_SequenceOverflow(t *testing.T) {
 	item2, _ := q.Pop()
 	if item2.Traits.Priority != TaskPriorityBestEffort {
 		t.Errorf("Expected BestEffort second, got %d", item2.Traits.Priority)
+	}
+}
+
+func TestFIFOTaskQueue_PopUpTo(t *testing.T) {
+	q := NewFIFOTaskQueue()
+	noop := func(ctx context.Context) {}
+
+	// Push 5 tasks
+	for i := 0; i < 5; i++ {
+		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
+	}
+
+	// Pop up to 3 tasks (should get first 3 in FIFO order)
+	tasks := q.PopUpTo(3)
+
+	if len(tasks) != 3 {
+		t.Errorf("Expected 3 tasks, got %d", len(tasks))
+	}
+
+	// Queue should still have 2 remaining tasks
+	if q.Len() != 2 {
+		t.Errorf("Expected 2 remaining tasks, got %d", q.Len())
+	}
+
+	// Pop the rest - should get 2 more
+	rest := q.PopUpTo(10)
+	if len(rest) != 2 {
+		t.Errorf("Expected 2 remaining tasks, got %d", len(rest))
+	}
+}
+
+func TestFIFOTaskQueue_MaybeCompact(t *testing.T) {
+	q := NewFIFOTaskQueue()
+	noop := func(ctx context.Context) {}
+
+	// Push 10 tasks
+	for i := 0; i < 10; i++ {
+		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
+	}
+
+	// Pop all tasks
+	for i := 0; i < 10; i++ {
+		q.Pop()
+	}
+
+	// MaybeCompact should reduce the underlying slice capacity
+	q.MaybeCompact()
+
+	// Push a new task - should still work
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
+
+	if q.Len() != 1 {
+		t.Errorf("Expected 1 task after MaybeCompact, got %d", q.Len())
+	}
+
+	// Verify it can still pop
+	item, ok := q.Pop()
+	if !ok {
+		t.Error("Failed to pop task after MaybeCompact")
+	}
+	if item.Traits.Priority != TaskPriorityUserVisible {
+		t.Errorf("Expected priority UserVisible, got %d", item.Traits.Priority)
 	}
 }

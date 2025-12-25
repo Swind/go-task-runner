@@ -171,6 +171,74 @@ func TestMemoryJobStore_DeleteJob(t *testing.T) {
 	}
 }
 
+func TestMemoryJobStore_Clear(t *testing.T) {
+	store := core.NewMemoryJobStore()
+	ctx := context.Background()
+
+	// Add multiple jobs
+	for i := 0; i < 5; i++ {
+		job := &core.JobEntity{
+			ID:     fmt.Sprintf("job%d", i),
+			Type:   "email",
+			Status: core.JobStatusPending,
+		}
+		if err := store.SaveJob(ctx, job); err != nil {
+			t.Fatalf("SaveJob failed: %v", err)
+		}
+	}
+
+	// Verify jobs exist
+	if count := store.Count(); count != 5 {
+		t.Errorf("Expected 5 jobs before clear, got %d", count)
+	}
+
+	// Clear all jobs
+	store.Clear()
+
+	// Verify all jobs are gone
+	if count := store.Count(); count != 0 {
+		t.Errorf("Expected 0 jobs after clear, got %d", count)
+	}
+
+	// Verify specific jobs are gone
+	if _, err := store.GetJob(ctx, "job1"); err == nil {
+		t.Error("Job should not exist after Clear()")
+	}
+}
+
+func TestMemoryJobStore_Count(t *testing.T) {
+	store := core.NewMemoryJobStore()
+	ctx := context.Background()
+
+	// Initially empty
+	if count := store.Count(); count != 0 {
+		t.Errorf("Expected 0 jobs initially, got %d", count)
+	}
+
+	// Add jobs one by one
+	for i := 1; i <= 10; i++ {
+		job := &core.JobEntity{
+			ID:     fmt.Sprintf("job%d", i),
+			Type:   "email",
+			Status: core.JobStatusPending,
+		}
+		store.SaveJob(ctx, job)
+
+		expected := i
+		if count := store.Count(); count != expected {
+			t.Errorf("Expected %d jobs after adding %d, got %d", expected, i, count)
+		}
+	}
+
+	// Delete some jobs and verify count
+	store.DeleteJob(ctx, "job1")
+	store.DeleteJob(ctx, "job2")
+
+	if count := store.Count(); count != 8 {
+		t.Errorf("Expected 8 jobs after deleting 2, got %d", count)
+	}
+}
+
 // =============================================================================
 // JobSerializer Tests
 // =============================================================================
@@ -1299,4 +1367,291 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 	}
 
 	_ = err // Submission error check depends on timing
+}
+
+// =============================================================================
+// JSONSerializer.Name() Test
+// =============================================================================
+
+func TestJSONSerializer_Name(t *testing.T) {
+	serializer := core.NewJSONSerializer()
+
+	name := serializer.Name()
+	if name != "json" {
+		t.Errorf("Expected name 'json', got '%s'", name)
+	}
+}
+
+// =============================================================================
+// NoOpLogger Methods Test (Explicit Call Coverage)
+// =============================================================================
+
+func TestNoOpLogger_ExplicitCoverage(t *testing.T) {
+	logger := core.NewNoOpLogger()
+
+	// Explicitly call each method to ensure coverage
+	logger.Debug("test debug", core.F("key1", "value1"), core.F("key2", "value2"))
+	logger.Info("test info", core.F("key", "value"))
+	logger.Warn("test warn", core.F("level", "high"))
+	logger.Error("test error", core.F("err", "something failed"))
+
+	// No assertions needed - we're just verifying these methods are callable
+}
+
+// =============================================================================
+// JobManager.ListJobs() Tests
+// =============================================================================
+
+func TestJobManager_ListJobs_FilterByStatus(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	ctx := context.Background()
+
+	// Add jobs with different statuses
+	job1 := &core.JobEntity{ID: "job1", Type: "test", Status: core.JobStatusPending}
+	job2 := &core.JobEntity{ID: "job2", Type: "test", Status: core.JobStatusCompleted}
+	job3 := &core.JobEntity{ID: "job3", Type: "test", Status: core.JobStatusPending}
+
+	store.SaveJob(ctx, job1)
+	store.SaveJob(ctx, job2)
+	store.SaveJob(ctx, job3)
+
+	// List only pending jobs
+	jobs, err := manager.ListJobs(ctx, core.JobFilter{Status: core.JobStatusPending})
+	if err != nil {
+		t.Fatalf("ListJobs failed: %v", err)
+	}
+
+	if len(jobs) != 2 {
+		t.Errorf("Expected 2 pending jobs, got %d", len(jobs))
+	}
+
+	for _, job := range jobs {
+		if job.Status != core.JobStatusPending {
+			t.Errorf("Expected status PENDING, got %s", job.Status)
+		}
+	}
+}
+
+func TestJobManager_ListJobs_FilterByType(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	ctx := context.Background()
+
+	// Add jobs with different types
+	job1 := &core.JobEntity{ID: "job1", Type: "email", Status: core.JobStatusPending}
+	job2 := &core.JobEntity{ID: "job2", Type: "sms", Status: core.JobStatusPending}
+	job3 := &core.JobEntity{ID: "job3", Type: "email", Status: core.JobStatusPending}
+
+	store.SaveJob(ctx, job1)
+	store.SaveJob(ctx, job2)
+	store.SaveJob(ctx, job3)
+
+	// List only email jobs
+	jobs, err := manager.ListJobs(ctx, core.JobFilter{Type: "email"})
+	if err != nil {
+		t.Fatalf("ListJobs failed: %v", err)
+	}
+
+	if len(jobs) != 2 {
+		t.Errorf("Expected 2 email jobs, got %d", len(jobs))
+	}
+
+	for _, job := range jobs {
+		if job.Type != "email" {
+			t.Errorf("Expected type 'email', got %s", job.Type)
+		}
+	}
+}
+
+func TestJobManager_ListJobs_WithLimitAndOffset(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	ctx := context.Background()
+
+	// Add 10 jobs
+	for i := 0; i < 10; i++ {
+		job := &core.JobEntity{
+			ID:     fmt.Sprintf("job%d", i),
+			Type:   "test",
+			Status: core.JobStatusPending,
+		}
+		store.SaveJob(ctx, job)
+	}
+
+	// Test limit
+	jobs, err := manager.ListJobs(ctx, core.JobFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("ListJobs with limit failed: %v", err)
+	}
+	if len(jobs) != 5 {
+		t.Errorf("Expected 5 jobs with limit, got %d", len(jobs))
+	}
+
+	// Test offset
+	jobs, err = manager.ListJobs(ctx, core.JobFilter{Offset: 5, Limit: 3})
+	if err != nil {
+		t.Fatalf("ListJobs with offset failed: %v", err)
+	}
+	if len(jobs) != 3 {
+		t.Errorf("Expected 3 jobs with offset=5,limit=3, got %d", len(jobs))
+	}
+}
+
+// =============================================================================
+// JobManager.Start() Recovery Tests
+// =============================================================================
+
+func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	// Register handler
+	handlerCalled := atomic.Bool{}
+	handler := func(ctx context.Context, args EmailArgs) error {
+		handlerCalled.Store(true)
+		return nil
+	}
+
+	core.RegisterHandler(manager, "email", handler)
+
+	// Create a PENDING job directly in store (simulating jobs from previous run)
+	ctx := context.Background()
+	existingJob := &core.JobEntity{
+		ID:       "recovery-job-1",
+		Type:     "email",
+		ArgsData: []byte(`{"to":"recovery@example.com"}`),
+		Status:   core.JobStatusPending,
+		Priority: 1,
+	}
+	if err := store.SaveJob(ctx, existingJob); err != nil {
+		t.Fatalf("Failed to create job in store: %v", err)
+	}
+
+	// Start the manager - should recover the pending job
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Wait for recovery and execution
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify handler was called
+	if !handlerCalled.Load() {
+		t.Error("Handler was not called for recovered job")
+	}
+
+	// Verify job status changed
+	job, err := manager.GetJob(ctx, "recovery-job-1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusCompleted {
+		t.Errorf("Expected status COMPLETED after recovery, got %s", job.Status)
+	}
+
+	// Cleanup
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	manager.Shutdown(shutdownCtx)
+}
+
+func TestJobManager_Start_ConvertsRunningToFailed(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Create a RUNNING job directly in store (simulating crash during execution)
+	ctx := context.Background()
+	runningJob := &core.JobEntity{
+		ID:       "running-job-1",
+		Type:     "email",
+		ArgsData: []byte(`{"to":"test@example.com"}`),
+		Status:   core.JobStatusRunning,
+		Priority: 1,
+	}
+	if err := store.SaveJob(ctx, runningJob); err != nil {
+		t.Fatalf("Failed to create job in store: %v", err)
+	}
+
+	// Start the manager - should mark RUNNING jobs as FAILED
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Wait for recovery to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify job status changed to FAILED
+	job, err := manager.GetJob(ctx, "running-job-1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusFailed {
+		t.Errorf("Expected status FAILED after recovery, got %s", job.Status)
+	}
+	if job.Result != "Interrupted by restart" {
+		t.Errorf("Expected result 'Interrupted by restart', got '%s'", job.Result)
+	}
+
+	// Cleanup
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	manager.Shutdown(shutdownCtx)
 }

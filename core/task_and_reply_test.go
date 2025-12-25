@@ -508,3 +508,54 @@ func TestPostTaskAndReplyWithResultAndTraits(t *testing.T) {
 		t.Error("Reply was not executed")
 	}
 }
+
+func TestTraitsUserVisible(t *testing.T) {
+	traits := TraitsUserVisible()
+	if traits.Priority != TaskPriorityUserVisible {
+		t.Errorf("Expected priority UserVisible (1), got %d", traits.Priority)
+	}
+}
+
+func TestSingleThreadTaskRunner_GetThreadPool(t *testing.T) {
+	runner := NewSingleThreadTaskRunner()
+
+	// SingleThreadTaskRunner doesn't use a thread pool
+	pool := runner.GetThreadPool()
+	if pool != nil {
+		t.Error("SingleThreadTaskRunner.GetThreadPool should return nil")
+	}
+
+	runner.Shutdown()
+}
+
+func TestSingleThreadTaskRunner_PostTaskAndReplyWithTraits(t *testing.T) {
+	targetRunner := NewSingleThreadTaskRunner()
+	defer targetRunner.Shutdown()
+
+	replyRunner := NewSingleThreadTaskRunner()
+	defer replyRunner.Shutdown()
+
+	var taskExecuted, replyExecuted atomic.Bool
+
+	// PostTaskAndReplyWithTraits with specific traits
+	targetRunner.PostTaskAndReplyWithTraits(
+		func(ctx context.Context) {
+			taskExecuted.Store(true)
+		},
+		TraitsBestEffort(), // Low priority task
+		func(ctx context.Context) {
+			replyExecuted.Store(true)
+		},
+		TraitsUserBlocking(), // High priority reply
+		replyRunner,
+	)
+
+	time.Sleep(100 * time.Millisecond)
+
+	if !taskExecuted.Load() {
+		t.Error("Task was not executed")
+	}
+	if !replyExecuted.Load() {
+		t.Error("Reply was not executed")
+	}
+}

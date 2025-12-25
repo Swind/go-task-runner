@@ -524,3 +524,18 @@ func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) 
 
 	t.Fatal("SequencedTaskRunner with Real ThreadPool was not garbage collected")
 }
+
+func TestSequencedTaskRunner_GetThreadPool(t *testing.T) {
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+
+	// GetThreadPool should return the pool that was passed to NewSequencedTaskRunner
+	retrievedPool := runner.GetThreadPool()
+
+	if retrievedPool != pool {
+		t.Error("GetThreadPool should return the same pool that was passed to NewSequencedTaskRunner")
+	}
+}
