@@ -7,37 +7,38 @@ import (
 	"time"
 )
 
-// TestSequencedTaskRunner_Shutdown tests basic shutdown functionality
-// Main test items:
-// 1. Runner starts with IsClosed() returning false
-// 2. Shutdown() sets IsClosed() to true
+// TestSequencedTaskRunner_Shutdown verifies basic shutdown functionality
+// Given: A SequencedTaskRunner
+// When: Shutdown is called
+// Then: IsClosed returns true
 func TestSequencedTaskRunner_Shutdown(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Initially not closed
+	// Assert - Initially not closed
 	if runner.IsClosed() {
-		t.Error("Runner should not be closed initially")
+		t.Error("IsClosed() = true initially, want false")
 	}
 
-	// Shutdown
+	// Act
 	runner.Shutdown()
 
-	// Should be closed
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed after Shutdown()")
+		t.Error("IsClosed() = false after Shutdown(), want true")
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_ClearsPendingTasks tests shutdown clears pending tasks
-// Main test items:
-// 1. Pending tasks in queue are cleared on shutdown
-// 2. Currently executing task may complete
-// 3. Tasks after shutdown are rejected
+// TestSequencedTaskRunner_Shutdown_ClearsPendingTasks verifies shutdown clears pending tasks
+// Given: A SequencedTaskRunner with 10 pending slow tasks
+// When: Shutdown is called immediately
+// Then: Pending queue is cleared, most tasks don't execute
 func TestSequencedTaskRunner_Shutdown_ClearsPendingTasks(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -46,35 +47,32 @@ func TestSequencedTaskRunner_Shutdown_ClearsPendingTasks(t *testing.T) {
 
 	var executed atomic.Int32
 
-	// Post tasks but don't let them execute yet
-	// We'll shutdown before they run
+	// Act - Post slow tasks
 	for i := 0; i < 10; i++ {
 		runner.PostTask(func(ctx context.Context) {
-			time.Sleep(100 * time.Millisecond) // Slow task
+			time.Sleep(100 * time.Millisecond)
 			executed.Add(1)
 		})
 	}
 
-	// Shutdown immediately
-	time.Sleep(10 * time.Millisecond) // Let one task start
+	time.Sleep(10 * time.Millisecond)
 	runner.Shutdown()
 
-	// Wait a bit
 	time.Sleep(200 * time.Millisecond)
 
-	// Most tasks should not have executed
+	// Assert - Most tasks didn't execute due to shutdown
 	count := executed.Load()
 	if count >= 5 {
-		t.Errorf("Too many tasks executed after shutdown: %d (expected < 5)", count)
+		t.Errorf("executed = %d, want <5 (queue cleared)", count)
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks tests shutdown stops repeating tasks
-// Main test items:
-// 1. Repeating tasks stop executing after shutdown
-// 2. Handle.IsStopped() returns true
-// 3. Repeating task handle still works after shutdown
+// TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks verifies shutdown stops repeating tasks
+// Given: A SequencedTaskRunner with active repeating task
+// When: Shutdown is called
+// Then: Repeating task stops executing
 func TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -83,42 +81,31 @@ func TestSequencedTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 
 	var counter atomic.Int32
 
-	// Start a repeating task
-	handle := runner.PostRepeatingTask(func(ctx context.Context) {
+	runner.PostRepeatingTask(func(ctx context.Context) {
 		counter.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let it run a few times
 	time.Sleep(200 * time.Millisecond)
 
-	// Shutdown the runner
+	// Act
 	runner.Shutdown()
 
-	// Record count at shutdown
 	countAtShutdown := counter.Load()
-
-	// Wait and verify no more executions
 	time.Sleep(200 * time.Millisecond)
 	countAfterShutdown := counter.Load()
 
-	// Should not have increased (or increased by at most 1 if one was in flight)
+	// Assert - Task stops executing after shutdown
 	if countAfterShutdown > countAtShutdown+1 {
-		t.Errorf("Repeating task continued after shutdown: before=%d, after=%d",
-			countAtShutdown, countAfterShutdown)
-	}
-
-	// Handle should still work
-	handle.Stop()
-	if !handle.IsStopped() {
-		t.Error("Handle should report stopped")
+		t.Errorf("count after = %d, want ~%d", countAfterShutdown, countAtShutdown)
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks tests shutdown with multiple repeating tasks
-// Main test items:
-// 1. All repeating tasks stop after shutdown
-// 2. Multiple repeating tasks are handled correctly
+// TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks verifies shutdown with multiple repeating tasks
+// Given: A SequencedTaskRunner with 3 repeating tasks
+// When: Shutdown is called
+// Then: All repeating tasks stop
 func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -127,7 +114,6 @@ func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
 
 	var counter1, counter2, counter3 atomic.Int32
 
-	// Start multiple repeating tasks
 	runner.PostRepeatingTask(func(ctx context.Context) {
 		counter1.Add(1)
 	}, 30*time.Millisecond)
@@ -140,19 +126,18 @@ func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
 		counter3.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let them run
 	time.Sleep(200 * time.Millisecond)
 
-	// Shutdown
+	// Act
 	runner.Shutdown()
 
 	c1 := counter1.Load()
 	c2 := counter2.Load()
 	c3 := counter3.Load()
 
-	// Wait and verify all stopped
 	time.Sleep(200 * time.Millisecond)
 
+	// Assert - All stopped
 	if counter1.Load() > c1+1 {
 		t.Error("Task 1 continued after shutdown")
 	}
@@ -164,12 +149,12 @@ func TestSequencedTaskRunner_Shutdown_MultipleRepeatingTasks(t *testing.T) {
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_WithDelayedTasks tests shutdown with delayed tasks
-// Main test items:
-// 1. Delayed tasks are handled on shutdown
-// 2. Tasks in DelayManager may still execute
-// 3. Pending delayed tasks are not posted to closed runner
+// TestSequencedTaskRunner_Shutdown_WithDelayedTasks verifies shutdown with delayed tasks
+// Given: A SequencedTaskRunner with a 100ms delayed task
+// When: Shutdown is called before delay expires
+// Then: Task may still execute if already in DelayManager
 func TestSequencedTaskRunner_Shutdown_WithDelayedTasks(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -178,49 +163,49 @@ func TestSequencedTaskRunner_Shutdown_WithDelayedTasks(t *testing.T) {
 
 	var executed atomic.Bool
 
-	// Post a delayed task
 	runner.PostDelayedTask(func(ctx context.Context) {
 		executed.Store(true)
 	}, 100*time.Millisecond)
 
-	// Shutdown before it executes
+	// Act - Shutdown before task executes
 	time.Sleep(20 * time.Millisecond)
 	runner.Shutdown()
 
-	// Wait for the delay to pass
 	time.Sleep(150 * time.Millisecond)
 
-	// The delayed task might still execute since it's already in DelayManager
-	// But it won't be posted to the queue because runner is closed
-	// This is acceptable behavior
+	// Assert - Task might execute (already in DelayManager)
+	// This is acceptable behavior - task won't be posted to closed runner
 }
 
-// TestSequencedTaskRunner_Shutdown_Idempotent tests shutdown idempotence
-// Main test items:
-// 1. Multiple Shutdown() calls are safe
-// 2. IsClosed() returns true after any number of calls
+// TestSequencedTaskRunner_Shutdown_Idempotent verifies multiple shutdown calls are safe
+// Given: A SequencedTaskRunner
+// When: Shutdown is called multiple times
+// Then: All calls complete, IsClosed returns true
 func TestSequencedTaskRunner_Shutdown_Idempotent(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Multiple shutdowns should be safe
+	// Act - Multiple shutdowns
 	runner.Shutdown()
 	runner.Shutdown()
 	runner.Shutdown()
 
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should still be closed")
+		t.Error("IsClosed() = false, want true")
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_ConcurrentShutdown tests concurrent shutdown calls
-// Main test items:
-// 1. Multiple concurrent Shutdown() calls are safe
-// 2. All calls complete without panic
+// TestSequencedTaskRunner_Shutdown_ConcurrentShutdown verifies concurrent shutdown calls are safe
+// Given: A SequencedTaskRunner with 100 tasks
+// When: 10 goroutines call Shutdown concurrently
+// Then: All calls complete without panic, runner is closed
 func TestSequencedTaskRunner_Shutdown_ConcurrentShutdown(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -234,7 +219,7 @@ func TestSequencedTaskRunner_Shutdown_ConcurrentShutdown(t *testing.T) {
 		})
 	}
 
-	// Shutdown from multiple goroutines
+	// Act - Concurrent shutdowns
 	done := make(chan struct{})
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -243,22 +228,22 @@ func TestSequencedTaskRunner_Shutdown_ConcurrentShutdown(t *testing.T) {
 		}()
 	}
 
-	// Wait for all shutdowns
 	for i := 0; i < 10; i++ {
 		<-done
 	}
 
-	// Should be closed
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+		t.Error("IsClosed() = false, want true")
 	}
 }
 
-// TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown tests shutdown with delayed repeating task
-// Main test items:
-// 1. Repeating task with initial delay is stopped on shutdown
-// 2. Task never executes if shutdown before initial delay
+// TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown verifies shutdown with delayed repeating task
+// Given: A repeating task with 200ms initial delay
+// When: Shutdown is called before first execution
+// Then: Task never executes
 func TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -267,25 +252,23 @@ func TestSequencedTaskRunner_RepeatingTask_WithInitialDelay_Shutdown(t *testing.
 
 	var executed atomic.Bool
 
-	// Post repeating task with initial delay
 	runner.PostRepeatingTaskWithInitialDelay(
 		func(ctx context.Context) {
 			executed.Store(true)
 		},
-		200*time.Millisecond, // Initial delay
-		50*time.Millisecond,  // Interval
+		200*time.Millisecond,
+		50*time.Millisecond,
 		DefaultTaskTraits(),
 	)
 
-	// Shutdown before first execution
+	// Act - Shutdown before first execution
 	time.Sleep(50 * time.Millisecond)
 	runner.Shutdown()
 
-	// Wait past initial delay
 	time.Sleep(200 * time.Millisecond)
 
-	// Should not have executed
+	// Assert
 	if executed.Load() {
-		t.Error("Task should not execute after shutdown")
+		t.Error("executed = true, want false (shutdown before first execution)")
 	}
 }

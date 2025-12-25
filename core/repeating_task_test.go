@@ -7,60 +7,52 @@ import (
 	"time"
 )
 
-// TestRepeatingTask_BasicExecution tests basic repeating task functionality
-// Main test items:
-// 1. Repeating task executes multiple times
-// 2. Stop() prevents further executions
-// 3. IsStopped() returns true after Stop()
+// TestRepeatingTask_BasicExecution verifies basic repeating task functionality
+// Given: A repeating task every 50ms
+// When: Task runs for 250ms then is stopped
+// Then: Task executes multiple times and stops when handle.Stop() is called
 func TestRepeatingTask_BasicExecution(t *testing.T) {
-	// Create a simple in-memory thread pool for testing
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Counter to track executions
 	var counter atomic.Int32
 
-	// Post a repeating task
+	// Act
 	handle := runner.PostRepeatingTask(func(ctx context.Context) {
 		counter.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let it run for ~250ms (should execute ~5 times)
 	time.Sleep(250 * time.Millisecond)
-
-	// Stop the task
 	handle.Stop()
 
-	// Wait a bit to ensure no more executions
 	finalCount := counter.Load()
 	time.Sleep(100 * time.Millisecond)
 	afterStopCount := counter.Load()
 
-	// Verify it executed multiple times
+	// Assert
 	if finalCount < 3 {
-		t.Errorf("Expected at least 3 executions, got %d", finalCount)
+		t.Errorf("finalCount = %d, want >=3", finalCount)
 	}
 
-	// Verify no executions after stop
 	if afterStopCount != finalCount {
-		t.Errorf("Task continued executing after Stop(): before=%d, after=%d", finalCount, afterStopCount)
+		t.Errorf("afterStopCount = %d, want %d (no more executions)", afterStopCount, finalCount)
 	}
 
-	// Verify IsStopped
 	if !handle.IsStopped() {
-		t.Error("Expected IsStopped() to return true after Stop()")
+		t.Error("IsStopped() = false, want true")
 	}
 }
 
-// TestRepeatingTask_WithInitialDelay tests repeating task with initial delay
-// Main test items:
-// 1. Initial delay is respected before first execution
-// 2. Task continues to execute after initial delay
-// 3. Interval is used after initial delay
+// TestRepeatingTask_WithInitialDelay verifies repeating task with initial delay
+// Given: A repeating task with 100ms initial delay and 50ms interval
+// When: Task is posted
+// Then: First execution respects initial delay, then periodic execution continues
 func TestRepeatingTask_WithInitialDelay(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -77,21 +69,21 @@ func TestRepeatingTask_WithInitialDelay(t *testing.T) {
 				firstExecutionTime.Store(time.Now())
 			}
 		},
-		100*time.Millisecond, // initialDelay
-		50*time.Millisecond,  // interval
+		100*time.Millisecond,
+		50*time.Millisecond,
 		DefaultTaskTraits(),
 	)
 	defer handle.Stop()
 
-	// Wait for first execution
+	// Act - Wait for first execution
 	time.Sleep(150 * time.Millisecond)
 
 	firstExec := firstExecutionTime.Load().(time.Time)
 	elapsed := firstExec.Sub(startTime)
 
-	// Verify initial delay was respected (with some tolerance)
+	// Assert - Initial delay respected
 	if elapsed < 90*time.Millisecond || elapsed > 150*time.Millisecond {
-		t.Errorf("Initial delay not respected: elapsed=%v", elapsed)
+		t.Errorf("elapsed = %v, want 90-150ms", elapsed)
 	}
 
 	// Wait for more executions
@@ -99,15 +91,16 @@ func TestRepeatingTask_WithInitialDelay(t *testing.T) {
 
 	count := counter.Load()
 	if count < 3 {
-		t.Errorf("Expected at least 3 executions after initial delay, got %d", count)
+		t.Errorf("count = %d, want >=3", count)
 	}
 }
 
-// TestRepeatingTask_WithTraits tests repeating task with custom traits
-// Main test items:
-// 1. Repeating task respects task traits (priority)
-// 2. Task executes multiple times with custom traits
+// TestRepeatingTask_WithTraits verifies repeating task with custom traits
+// Given: A repeating task with UserBlocking priority
+// When: Task runs for 200ms
+// Then: Task executes multiple times with correct priority
 func TestRepeatingTask_WithTraits(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -116,7 +109,7 @@ func TestRepeatingTask_WithTraits(t *testing.T) {
 
 	var counter atomic.Int32
 
-	// Post with high priority traits
+	// Act
 	handle := runner.PostRepeatingTaskWithTraits(
 		func(ctx context.Context) {
 			counter.Add(1)
@@ -128,17 +121,19 @@ func TestRepeatingTask_WithTraits(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	handle.Stop()
 
+	// Assert
 	count := counter.Load()
 	if count < 2 {
-		t.Errorf("Expected at least 2 executions, got %d", count)
+		t.Errorf("count = %d, want >=2", count)
 	}
 }
 
-// TestRepeatingTask_StopBeforeFirstExecution tests stopping before execution
-// Main test items:
-// 1. Stop() called before first execution prevents execution
-// 2. IsStopped() returns true immediately
+// TestRepeatingTask_StopBeforeFirstExecution verifies stopping before first execution
+// Given: A repeating task with 200ms initial delay
+// When: Stop is called immediately
+// Then: Task never executes
 func TestRepeatingTask_StopBeforeFirstExecution(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -151,28 +146,28 @@ func TestRepeatingTask_StopBeforeFirstExecution(t *testing.T) {
 		func(ctx context.Context) {
 			executed.Store(true)
 		},
-		200*time.Millisecond, // long initial delay
+		200*time.Millisecond,
 		50*time.Millisecond,
 		DefaultTaskTraits(),
 	)
 
-	// Stop immediately
+	// Act - Stop immediately
 	handle.Stop()
 
-	// Wait to see if it executes (it shouldn't)
 	time.Sleep(250 * time.Millisecond)
 
+	// Assert
 	if executed.Load() {
-		t.Error("Task executed despite being stopped before first execution")
+		t.Error("executed = true, want false (stopped before first execution)")
 	}
 }
 
-// TestRepeatingTask_ConcurrentStop tests concurrent Stop() calls
-// Main test items:
-// 1. Multiple concurrent Stop() calls are safe
-// 2. All calls succeed without panic
-// 3. IsStopped() returns true after all calls complete
+// TestRepeatingTask_ConcurrentStop verifies concurrent Stop() calls are safe
+// Given: A repeating task
+// When: 10 goroutines call Stop() concurrently
+// Then: All calls complete, IsStopped returns true
 func TestRepeatingTask_ConcurrentStop(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -183,7 +178,7 @@ func TestRepeatingTask_ConcurrentStop(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}, 20*time.Millisecond)
 
-	// Call Stop() from multiple goroutines concurrently
+	// Act - Concurrent stops
 	done := make(chan struct{})
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -192,22 +187,22 @@ func TestRepeatingTask_ConcurrentStop(t *testing.T) {
 		}()
 	}
 
-	// Wait for all stops to complete
 	for i := 0; i < 10; i++ {
 		<-done
 	}
 
-	// Should be stopped
+	// Assert
 	if !handle.IsStopped() {
-		t.Error("Expected IsStopped() to be true after concurrent stops")
+		t.Error("IsStopped() = false, want true")
 	}
 }
 
-// TestRepeatingTask_ContextPropagation tests context propagation to repeating tasks
-// Main test items:
-// 1. TaskRunner is available in task context
-// 2. Context is properly propagated to each execution
+// TestRepeatingTask_ContextPropagation verifies context propagation to repeating tasks
+// Given: A repeating task
+// When: Task executes
+// Then: TaskRunner is available from context
 func TestRepeatingTask_ContextPropagation(t *testing.T) {
+	// Arrange
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -218,18 +213,18 @@ func TestRepeatingTask_ContextPropagation(t *testing.T) {
 	var handle RepeatingTaskHandle
 
 	handle = runner.PostRepeatingTask(func(ctx context.Context) {
-		// Verify we can get the runner from context
 		r := GetCurrentTaskRunner(ctx)
 		if r != nil {
 			gotRunner.Store(true)
 		}
-		handle.Stop() // Stop after first execution
+		handle.Stop()
 	}, 50*time.Millisecond)
 
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert
 	if !gotRunner.Load() {
-		t.Error("Failed to get TaskRunner from context")
+		t.Error("gotRunner = false, want true (TaskRunner available from context)")
 	}
 }
 
@@ -251,7 +246,6 @@ func newTestThreadPool() *testThreadPool {
 
 func (tp *testThreadPool) start() {
 	tp.ctx, tp.cancel = context.WithCancel(context.Background())
-	// Start 2 workers
 	for i := 0; i < 2; i++ {
 		go tp.worker()
 	}

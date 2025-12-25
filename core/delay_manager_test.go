@@ -15,13 +15,12 @@ import (
 // DelayManager Performance Tests
 // =============================================================================
 
-// TestDelayManager_BatchProcessing tests batch processing of expired tasks
-// Main test items:
-// 1. Verify that a large number of tasks expiring simultaneously can be batch processed
-// 2. Confirm that all tasks are executed correctly
-// 3. Verify the efficiency of batch processing (100 tasks complete within 300ms)
-// 4. Confirm that the processExpiredTasks() method correctly handles all expired tasks
+// TestDelayManager_BatchProcessing verifies batch processing of simultaneously expiring tasks
+// Given: A DelayManager with 100 tasks expiring at approximately the same time
+// When: All tasks expire and are processed
+// Then: All tasks execute correctly within 300ms
 func TestDelayManager_BatchProcessing(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -32,33 +31,32 @@ func TestDelayManager_BatchProcessing(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 	defer runner.Shutdown()
 
-	// Add 100 tasks that all expire at approximately the same time
 	var executed atomic.Int32
 
+	// Act - Add 100 tasks with ~100ms delay
 	for range 100 {
 		task := func(ctx context.Context) {
 			executed.Add(1)
 		}
-		// All tasks have ~100ms delay
 		dm.AddDelayedTask(task, 100*time.Millisecond, core.DefaultTaskTraits(), runner)
 	}
 
-	// Wait for all tasks to execute
+	// Wait for execution
 	time.Sleep(300 * time.Millisecond)
 
+	// Assert - Most tasks executed (allow timing tolerance)
 	count := executed.Load()
-	if count < 90 { // Allow some timing tolerance
-		t.Errorf("Expected ~100 tasks executed, got %d", count)
+	if count < 90 {
+		t.Errorf("executed tasks = %d, want ~100", count)
 	}
 }
 
-// TestDelayManager_ConcurrentAdd tests concurrent addition of delayed tasks
-// Main test items:
-// 1. Verify thread safety when multiple goroutines add tasks simultaneously
-// 2. Confirm that tasks with different delays execute in the correct order
-// 3. Verify the correctness of AddDelayedTask in concurrent environments
-// 4. Confirm that all added tasks are eventually executed
+// TestDelayManager_ConcurrentAdd verifies thread safety during concurrent task additions
+// Given: A DelayManager and multiple goroutines adding tasks
+// When: 100 goroutines concurrently add delayed tasks
+// Then: All tasks execute correctly without race conditions
 func TestDelayManager_ConcurrentAdd(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -69,11 +67,11 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 	defer runner.Shutdown()
 
-	// Concurrently add 100 tasks with different delays
 	const numTasks = 100
 	var wg sync.WaitGroup
 	var executed atomic.Int32
 
+	// Act - Concurrently add 100 tasks with different delays
 	for i := 0; i < numTasks; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -87,24 +85,22 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	}
 
 	wg.Wait()
-	// Wait for all delayed tasks to execute
-	// Tasks have delays from 50-140ms, so wait longer
+	// Wait for delayed tasks to execute (delays: 50-140ms)
 	time.Sleep(500 * time.Millisecond)
 
+	// Assert - Most tasks executed (allow 10% tolerance)
 	count := executed.Load()
-	if count < numTasks*90/100 { // Allow 10% tolerance
-		t.Errorf("Expected ~%d tasks executed, got %d", numTasks, count)
+	if count < numTasks*90/100 {
+		t.Errorf("executed tasks = %d, want ~%d", count, numTasks)
 	}
 }
 
-// TestDelayManager_HighFrequencyTimerResets tests high-frequency timer resets
-// Main test items:
-// 1. Simulate rapid consecutive task additions causing frequent wakeups
-// 2. Verify the correctness of the wakeup channel mechanism
-// 3. Confirm that timer resets do not lose tasks
-// 4. Verify system stability under high-frequency operations
-// Note: This test is timing-sensitive, uses t.Logf instead of t.Errorf to allow for occasional failures
+// TestDelayManager_HighFrequencyTimerResets verifies stability under rapid timer resets
+// Given: A DelayManager receiving tasks every 1ms
+// When: 100 tasks are added rapidly with short delays
+// Then: System remains stable and processes all tasks
 func TestDelayManager_HighFrequencyTimerResets(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -115,11 +111,10 @@ func TestDelayManager_HighFrequencyTimerResets(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 	defer runner.Shutdown()
 
-	// Simulate rapid task additions that would cause frequent timer resets
 	var executed atomic.Int32
 	done := make(chan struct{})
 
-	// Add a new task every 1ms for 100ms
+	// Act - Add task every 1ms for 100ms
 	go func() {
 		for i := 0; i < 100; i++ {
 			select {
@@ -129,41 +124,38 @@ func TestDelayManager_HighFrequencyTimerResets(t *testing.T) {
 				task := func(ctx context.Context) {
 					executed.Add(1)
 				}
-				// Short delay to trigger wakeups
 				dm.AddDelayedTask(task, 10*time.Millisecond, core.DefaultTaskTraits(), runner)
 				time.Sleep(time.Millisecond)
 			}
 		}
 	}()
 
-	// Wait for all tasks to be added and execute
 	time.Sleep(300 * time.Millisecond)
 	close(done)
+	time.Sleep(100 * time.Millisecond)
 
-	time.Sleep(100 * time.Millisecond) // Final wait for stragglers
-
+	// Assert - Most tasks executed (timing sensitive)
 	count := executed.Load()
-	if count < 90 { // Allow some tolerance for timing
-		t.Logf("Warning: Only %d/100 tasks executed (timing sensitive)", count)
+	if count < 90 {
+		t.Logf("Warning: executed tasks = %d/100 (timing sensitive test)", count)
 	}
 }
 
-// TestDelayManager_EmptyQueue tests empty queue behavior
-// Main test items:
-// 1. Verify that TaskCount returns 0 when the queue is empty
-// 2. Confirm that an empty queue does not cause crashes or anomalies
-// 3. Verify that adding tasks to an empty queue works correctly
-// 4. Confirm that the timer is handled correctly when the queue is empty
+// TestDelayManager_EmptyQueue verifies behavior with no pending tasks
+// Given: An empty DelayManager
+// When: TaskCount is queried and a task is added
+// Then: TaskCount returns 0 and new task executes correctly
 func TestDelayManager_EmptyQueue(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
-	// Empty queue should not cause issues
+	// Assert - Empty queue returns 0
 	if dm.TaskCount() != 0 {
-		t.Errorf("Expected 0 tasks, got %d", dm.TaskCount())
+		t.Errorf("TaskCount() = %d, want 0", dm.TaskCount())
 	}
 
-	// Add and process a task
+	// Arrange - Setup pool and runner
 	pool := taskrunner.NewGoroutineThreadPool("test", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -175,22 +167,23 @@ func TestDelayManager_EmptyQueue(t *testing.T) {
 	task := func(ctx context.Context) {
 		executed.Store(true)
 	}
-	dm.AddDelayedTask(task, 10*time.Millisecond, core.DefaultTaskTraits(), runner)
 
+	// Act - Add task to empty queue
+	dm.AddDelayedTask(task, 10*time.Millisecond, core.DefaultTaskTraits(), runner)
 	time.Sleep(50 * time.Millisecond)
 
+	// Assert - Task executed
 	if !executed.Load() {
-		t.Error("Task was not executed")
+		t.Error("executed = false, want true")
 	}
 }
 
-// TestDelayManager_MultipleDelays tests tasks with multiple different delays
-// Main test items:
-// 1. Verify that tasks with different delays execute in the correct order
-// 2. Confirm the correctness of Heap ordering (shortest delay executes first)
-// 3. Verify that task execution times match the expected delay order
-// 4. Confirm that multiple delayed tasks do not interfere with each other
+// TestDelayManager_MultipleDelays verifies execution order with varied delays
+// Given: A DelayManager with tasks having delays of 20, 40, 60, 80, 100ms
+// When: Tasks are added concurrently
+// Then: Tasks execute in order of shortest to longest delay
 func TestDelayManager_MultipleDelays(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -201,11 +194,10 @@ func TestDelayManager_MultipleDelays(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 	defer runner.Shutdown()
 
-	// Track execution order by storing completion times
 	var times atomic.Value // []time.Time
 	times.Store(make([]time.Time, 0, 5))
 
-	// Add tasks with different delays
+	// Act - Add tasks with different delays
 	delays := []time.Duration{20, 40, 60, 80, 100}
 	for _, delay := range delays {
 		d := delay
@@ -216,15 +208,14 @@ func TestDelayManager_MultipleDelays(t *testing.T) {
 		dm.AddDelayedTask(task, d*time.Millisecond, core.DefaultTaskTraits(), runner)
 	}
 
-	// Wait for all to complete
 	time.Sleep(200 * time.Millisecond)
 
+	// Assert - All tasks executed in order
 	completed := times.Load().([]time.Time)
 	if len(completed) != 5 {
-		t.Errorf("Expected 5 tasks executed, got %d", len(completed))
+		t.Errorf("len(completed) = %d, want 5", len(completed))
 	}
 
-	// Verify they executed in order (approximately)
 	for i := 1; i < len(completed); i++ {
 		if completed[i].Before(completed[i-1]) {
 			t.Errorf("Task %d executed before task %d", i, i-1)
@@ -232,13 +223,12 @@ func TestDelayManager_MultipleDelays(t *testing.T) {
 	}
 }
 
-// TestDelayManager_TaskCount tests the task count functionality
-// Main test items:
-// 1. Verify that TaskCount returns 0 when the queue is empty
-// 2. Confirm that TaskCount increments correctly after adding tasks
-// 3. Verify the immediacy of TaskCount (synchronous read)
-// 4. Confirm that the count decreases correctly after task execution
+// TestDelayManager_TaskCount verifies pending task counter accuracy
+// Given: An empty DelayManager
+// When: 10 tasks are added with long delays
+// Then: TaskCount reflects the number of pending tasks
 func TestDelayManager_TaskCount(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -249,32 +239,31 @@ func TestDelayManager_TaskCount(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 	defer runner.Shutdown()
 
-	// Initially empty
+	// Assert - Initially empty
 	if count := dm.TaskCount(); count != 0 {
-		t.Errorf("Expected 0 tasks, got %d", count)
+		t.Errorf("TaskCount() = %d, want 0", count)
 	}
 
-	// Add tasks
+	// Act - Add 10 tasks with 1 second delay
 	const numTasks = 10
 	for i := 0; i < numTasks; i++ {
 		task := func(ctx context.Context) {}
 		dm.AddDelayedTask(task, 1*time.Second, core.DefaultTaskTraits(), runner)
 	}
 
-	// Should have tasks pending
+	// Assert - TaskCount reflects pending tasks
 	count := dm.TaskCount()
 	if count != numTasks {
-		t.Logf("Warning: Expected %d tasks, got %d (timing may vary)", numTasks, count)
+		t.Logf("TaskCount() = %d, want %d (timing may vary)", count, numTasks)
 	}
 }
 
-// TestDelayManager_AccurateTiming tests the precision of delay times
-// Main test items:
-// 1. Verify that delayed tasks execute after the specified delay time
-// 2. Confirm that the delay time precision is within an acceptable range (+/- 20ms)
-// 3. Verify the correctness of the timer mechanism
-// 4. Confirm that the calculateNextRun() method correctly calculates the next execution time
+// TestDelayManager_AccurateTiming verifies delay execution precision
+// Given: A DelayManager with a task delayed 50ms
+// When: The task executes
+// Then: Actual delay is within 30-70ms range (±20ms tolerance)
 func TestDelayManager_AccurateTiming(t *testing.T) {
+	// Arrange
 	dm := core.NewDelayManager()
 	defer dm.Stop()
 
@@ -292,17 +281,18 @@ func TestDelayManager_AccurateTiming(t *testing.T) {
 		executedAt.Store(time.Now().UnixNano())
 	}
 
+	// Act - Record start time and add delayed task
 	start := time.Now()
 	dm.AddDelayedTask(task, delay, core.DefaultTaskTraits(), runner)
-
-	// Wait for execution
 	time.Sleep(200 * time.Millisecond)
 
+	// Assert - Delay was approximately 50ms (±20ms)
 	executed := time.Unix(0, executedAt.Load())
 	elapsed := executed.Sub(start)
 
-	// Should be approximately 50ms, allow +/- 20ms tolerance
-	if elapsed < 30*time.Millisecond || elapsed > 70*time.Millisecond {
-		t.Errorf("Expected ~50ms delay, got %v", elapsed)
+	minDelay := 30 * time.Millisecond
+	maxDelay := 70 * time.Millisecond
+	if elapsed < minDelay || elapsed > maxDelay {
+		t.Errorf("elapsed delay = %v, want %v±20ms", elapsed, delay)
 	}
 }

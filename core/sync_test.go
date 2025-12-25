@@ -12,20 +12,19 @@ import (
 // =============================================================================
 
 // TestSequencedTaskRunner_WaitIdle tests WaitIdle for SequencedTaskRunner
-// Main test items:
-// 1. WaitIdle blocks until all tasks complete
-// 2. Returns nil when all tasks are done
-// 3. All tasks execute successfully
+// Given: a SequencedTaskRunner with 5 posted tasks
+// When: WaitIdle is called with a timeout context
+// Then: all tasks complete and WaitIdle returns nil with counter = 5
 func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and counter
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var counter atomic.Int32
 
-	// Post some tasks
+	// Act - Post 5 tasks and wait for them to complete
 	for i := 0; i < 5; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -33,54 +32,60 @@ func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 		})
 	}
 
-	// Wait for all tasks to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err := runner.WaitIdle(ctx)
+
+	// Assert - Verify all tasks completed and no error occurred
 	if err != nil {
 		t.Fatalf("WaitIdle failed: %v", err)
 	}
 
-	if counter.Load() != 5 {
-		t.Errorf("Expected 5 tasks to complete, got %d", counter.Load())
+	got := counter.Load()
+	want := int32(5)
+	if got != want {
+		t.Errorf("task count: got = %d, want %d", got, want)
 	}
 }
 
 // TestSequencedTaskRunner_WaitIdle_Timeout tests WaitIdle timeout behavior
-// Main test items:
-// 1. WaitIdle returns context.DeadlineExceeded on timeout
-// 2. Long-running task causes timeout
+// Given: a SequencedTaskRunner with a long-running task (5 seconds)
+// When: WaitIdle is called with a short timeout (100ms)
+// Then: WaitIdle returns context.DeadlineExceeded error
 func TestSequencedTaskRunner_WaitIdle_Timeout(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and post long-running task
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Post a long-running task
+	// Act - Post long task and wait with short timeout
 	runner.PostTask(func(ctx context.Context) {
 		time.Sleep(5 * time.Second)
 	})
 
-	// WaitIdle with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	err := runner.WaitIdle(ctx)
+
+	// Assert - Verify timeout error occurred
 	if err == nil {
-		t.Error("Expected timeout error, got nil")
+		t.Error("timeout error: got = nil, want = context.DeadlineExceeded")
 	}
 	if err != context.DeadlineExceeded {
-		t.Errorf("Expected DeadlineExceeded, got %v", err)
+		t.Errorf("error type: got = %v, want = context.DeadlineExceeded", err)
 	}
 }
 
 // TestSequencedTaskRunner_WaitIdle_AfterShutdown tests WaitIdle after shutdown
-// Main test items:
-// 1. WaitIdle returns error when runner is closed
-// 2. Shutdown prevents waiting
+// Given: a SequencedTaskRunner that has been shutdown
+// When: WaitIdle is called
+// Then: WaitIdle returns an error indicating the runner is closed
 func TestSequencedTaskRunner_WaitIdle_AfterShutdown(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and shutdown
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
@@ -88,24 +93,27 @@ func TestSequencedTaskRunner_WaitIdle_AfterShutdown(t *testing.T) {
 	runner := NewSequencedTaskRunner(pool)
 	runner.Shutdown()
 
+	// Act - Call WaitIdle on shutdown runner
 	err := runner.WaitIdle(context.Background())
+
+	// Assert - Verify error is returned for closed runner
 	if err == nil {
-		t.Error("Expected error for closed runner, got nil")
+		t.Error("error for closed runner: got = nil, want = non-nil error")
 	}
 }
 
 // TestSingleThreadTaskRunner_WaitIdle tests WaitIdle for SingleThreadTaskRunner
-// Main test items:
-// 1. WaitIdle blocks until all tasks complete
-// 2. Returns nil when all tasks are done
-// 3. All tasks execute successfully on single thread
+// Given: a SingleThreadTaskRunner with 5 posted tasks
+// When: WaitIdle is called with a timeout context
+// Then: all tasks complete and WaitIdle returns nil with counter = 5
 func TestSingleThreadTaskRunner_WaitIdle(t *testing.T) {
+	// Arrange - Setup runner and counter
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var counter atomic.Int32
 
-	// Post some tasks
+	// Act - Post 5 tasks and wait for completion
 	for i := 0; i < 5; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -113,17 +121,20 @@ func TestSingleThreadTaskRunner_WaitIdle(t *testing.T) {
 		})
 	}
 
-	// Wait for all tasks to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err := runner.WaitIdle(ctx)
+
+	// Assert - Verify all tasks completed and no error occurred
 	if err != nil {
 		t.Fatalf("WaitIdle failed: %v", err)
 	}
 
-	if counter.Load() != 5 {
-		t.Errorf("Expected 5 tasks to complete, got %d", counter.Load())
+	got := counter.Load()
+	want := int32(5)
+	if got != want {
+		t.Errorf("task count: got = %d, want %d", got, want)
 	}
 }
 
@@ -132,21 +143,20 @@ func TestSingleThreadTaskRunner_WaitIdle(t *testing.T) {
 // =============================================================================
 
 // TestSequencedTaskRunner_FlushAsync tests FlushAsync for SequencedTaskRunner
-// Main test items:
-// 1. FlushAsync callback is called after all tasks complete
-// 2. Callback executes on the runner's sequence
-// 3. All tasks complete before callback
+// Given: a SequencedTaskRunner with 5 posted tasks and a flush callback
+// When: FlushAsync is called to register the callback
+// Then: the callback is invoked after all tasks complete with counter = 5
 func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
+	// Arrange - Setup thread pool, runner, counter, and callback flag
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var counter atomic.Int32
 	var flushCalled atomic.Bool
 
-	// Post some tasks
+	// Act - Post 5 tasks and register flush callback
 	for i := 0; i < 5; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -154,7 +164,6 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 		})
 	}
 
-	// Flush callback
 	runner.FlushAsync(func() {
 		flushCalled.Store(true)
 		if counter.Load() != 5 {
@@ -162,27 +171,30 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 		}
 	})
 
-	// Wait for flush
+	// Wait for flush to complete
 	time.Sleep(200 * time.Millisecond)
 
-	if !flushCalled.Load() {
-		t.Error("Flush callback was not called")
+	// Assert - Verify flush callback was called
+	got := flushCalled.Load()
+	want := true
+	if got != want {
+		t.Errorf("flush callback called: got = %v, want %v", got, want)
 	}
 }
 
 // TestSingleThreadTaskRunner_FlushAsync tests FlushAsync for SingleThreadTaskRunner
-// Main test items:
-// 1. FlushAsync callback is called after all tasks complete
-// 2. Callback executes on the dedicated thread
-// 3. All tasks complete before callback
+// Given: a SingleThreadTaskRunner with 5 posted tasks and a flush callback
+// When: FlushAsync is called to register the callback
+// Then: the callback is invoked on the dedicated thread after all tasks complete
 func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
+	// Arrange - Setup runner, counter, and callback flag
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var counter atomic.Int32
 	var flushCalled atomic.Bool
 
-	// Post some tasks
+	// Act - Post 5 tasks and register flush callback
 	for i := 0; i < 5; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -190,7 +202,6 @@ func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
 		})
 	}
 
-	// Flush callback
 	runner.FlushAsync(func() {
 		flushCalled.Store(true)
 		if counter.Load() != 5 {
@@ -198,11 +209,14 @@ func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
 		}
 	})
 
-	// Wait for flush
+	// Wait for flush to complete
 	time.Sleep(200 * time.Millisecond)
 
-	if !flushCalled.Load() {
-		t.Error("Flush callback was not called")
+	// Assert - Verify flush callback was called
+	got := flushCalled.Load()
+	want := true
+	if got != want {
+		t.Errorf("flush callback called: got = %v, want %v", got, want)
 	}
 }
 
@@ -211,20 +225,19 @@ func TestSingleThreadTaskRunner_FlushAsync(t *testing.T) {
 // =============================================================================
 
 // TestSequencedTaskRunner_WaitShutdown_External tests external shutdown notification
-// Main test items:
-// 1. WaitShutdown unblocks when Shutdown is called
-// 2. Returns nil when shutdown is triggered
-// 3. External Shutdown() call wakes up waiters
+// Given: a goroutine waiting on WaitShutdown and a SequencedTaskRunner
+// When: Shutdown is called externally
+// Then: WaitShutdown unblocks and returns nil
 func TestSequencedTaskRunner_WaitShutdown_External(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and start waiting goroutine
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var shutdownReceived atomic.Bool
 
-	// Goroutine waiting for shutdown
+	// Act - Start goroutine waiting for shutdown, then trigger shutdown
 	go func() {
 		err := runner.WaitShutdown(context.Background())
 		if err != nil {
@@ -233,40 +246,40 @@ func TestSequencedTaskRunner_WaitShutdown_External(t *testing.T) {
 		shutdownReceived.Store(true)
 	}()
 
-	// Shutdown after delay
 	time.Sleep(100 * time.Millisecond)
 	runner.Shutdown()
 
 	// Wait for shutdown to be received
 	time.Sleep(100 * time.Millisecond)
 
-	if !shutdownReceived.Load() {
-		t.Error("WaitShutdown did not receive shutdown signal")
+	// Assert - Verify shutdown was received
+	got := shutdownReceived.Load()
+	want := true
+	if got != want {
+		t.Errorf("shutdown signal received: got = %v, want %v", got, want)
 	}
 }
 
 // TestSequencedTaskRunner_WaitShutdown_Internal tests internal shutdown notification
-// Main test items:
-// 1. WaitShutdown unblocks when task calls Shutdown
-// 2. Shutdown can be triggered from within a task
-// 3. Task can self-initiate shutdown
+// Given: a SequencedTaskRunner with multiple heartbeat tasks
+// When: a task calls Shutdown internally when heartbeat count reaches 10
+// Then: WaitShutdown unblocks and runner is closed
 func TestSequencedTaskRunner_WaitShutdown_Internal(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and heartbeat counter
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var taskExecuted atomic.Bool
 	var heartbeatCount atomic.Int32
 
-	// Post multiple heartbeat tasks
+	// Act - Post tasks that trigger shutdown at 10th heartbeat
 	for i := 0; i < 15; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			count := heartbeatCount.Add(1)
 			taskExecuted.Store(true)
 
-			// Shutdown at 10th heartbeat
 			if count >= 10 {
 				me := GetCurrentTaskRunner(ctx)
 				me.Shutdown()
@@ -274,50 +287,47 @@ func TestSequencedTaskRunner_WaitShutdown_Internal(t *testing.T) {
 		})
 	}
 
-	// Wait for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err := runner.WaitShutdown(ctx)
+
+	// Assert - Verify shutdown completed and runner is closed
 	if err != nil {
 		t.Fatalf("WaitShutdown failed: %v", err)
 	}
 
-	// Verify shutdown happened
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+		t.Error("runner closed: got = false, want = true")
 	}
 
-	// Wait a bit to see final count
+	// Verify task execution count
 	time.Sleep(100 * time.Millisecond)
-
-	// Should have executed 10 tasks, 11th task triggered shutdown
 	count := heartbeatCount.Load()
 	if count < 10 {
-		t.Errorf("Expected at least 10 tasks executed, got %d", count)
+		t.Errorf("heartbeat count: got = %d (want >= 10)", count)
 	}
 	if count > 11 {
-		t.Errorf("Expected at most 11 tasks executed (including shutdown task), got %d", count)
+		t.Errorf("heartbeat count: got = %d (want <= 11)", count)
 	}
 }
 
 // TestSingleThreadTaskRunner_WaitShutdown_Internal tests internal shutdown for SingleThreadTaskRunner
-// Main test items:
-// 1. WaitShutdown unblocks when task calls Shutdown
-// 2. Shutdown can be triggered from within a task
-// 3. Task can self-initiate shutdown on dedicated thread
+// Given: a SingleThreadTaskRunner with multiple heartbeat tasks
+// When: a task calls Shutdown internally when heartbeat count reaches 10
+// Then: WaitShutdown unblocks and runner is closed
 func TestSingleThreadTaskRunner_WaitShutdown_Internal(t *testing.T) {
+	// Arrange - Setup runner and heartbeat counter
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var heartbeatCount atomic.Int32
 
-	// Post multiple heartbeat tasks
+	// Act - Post tasks that trigger shutdown at 10th heartbeat
 	for i := 0; i < 15; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			count := heartbeatCount.Add(1)
 
-			// Shutdown at 10th heartbeat
 			if count >= 10 {
 				me := GetCurrentTaskRunner(ctx)
 				me.Shutdown()
@@ -325,45 +335,47 @@ func TestSingleThreadTaskRunner_WaitShutdown_Internal(t *testing.T) {
 		})
 	}
 
-	// Wait for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err := runner.WaitShutdown(ctx)
+
+	// Assert - Verify shutdown completed and runner is closed
 	if err != nil {
 		t.Fatalf("WaitShutdown failed: %v", err)
 	}
 
-	// Verify shutdown happened
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+		t.Error("runner closed: got = false, want = true")
 	}
 
-	// Stop the runner (Shutdown doesn't stop it immediately)
 	runner.Stop()
 }
 
 // TestSequencedTaskRunner_WaitShutdown_Timeout tests WaitShutdown timeout behavior
-// Main test items:
-// 1. WaitShutdown returns context.DeadlineExceeded on timeout
-// 2. Timeout occurs when no shutdown is triggered
+// Given: a SequencedTaskRunner with no shutdown triggered
+// When: WaitShutdown is called with a timeout
+// Then: WaitShutdown returns context.DeadlineExceeded error
 func TestSequencedTaskRunner_WaitShutdown_Timeout(t *testing.T) {
+	// Arrange - Setup thread pool and runner
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Wait with timeout (no shutdown)
+	// Act - Call WaitShutdown with timeout (no shutdown triggered)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	err := runner.WaitShutdown(ctx)
+
+	// Assert - Verify timeout error occurred
 	if err == nil {
-		t.Error("Expected timeout error, got nil")
+		t.Error("timeout error: got = nil, want = context.DeadlineExceeded")
 	}
 	if err != context.DeadlineExceeded {
-		t.Errorf("Expected DeadlineExceeded, got %v", err)
+		t.Errorf("error type: got = %v, want = context.DeadlineExceeded", err)
 	}
 
 	runner.Shutdown() // Cleanup
@@ -374,27 +386,25 @@ func TestSequencedTaskRunner_WaitShutdown_Timeout(t *testing.T) {
 // =============================================================================
 
 // TestSequencedTaskRunner_WaitIdle_ThenShutdown tests WaitIdle followed by Shutdown
-// Main test items:
-// 1. WaitIdle completes when all tasks are done
-// 2. Shutdown can be called after WaitIdle
-// 3. WaitShutdown completes after Shutdown
+// Given: a SequencedTaskRunner with 10 posted tasks
+// When: WaitIdle is called first, then Shutdown and WaitShutdown
+// Then: both operations complete successfully with all tasks executed
 func TestSequencedTaskRunner_WaitIdle_ThenShutdown(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and counter
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var counter atomic.Int32
 
-	// Post some tasks
+	// Act - Post 10 tasks, wait for idle, then shutdown
 	for i := 0; i < 10; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			counter.Add(1)
 		})
 	}
 
-	// Wait for all tasks to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -403,35 +413,36 @@ func TestSequencedTaskRunner_WaitIdle_ThenShutdown(t *testing.T) {
 		t.Fatalf("WaitIdle failed: %v", err)
 	}
 
-	if counter.Load() != 10 {
-		t.Errorf("Expected 10 tasks, got %d", counter.Load())
-	}
-
-	// Now shutdown
 	runner.Shutdown()
 
-	// Verify shutdown
 	err = runner.WaitShutdown(context.Background())
+
+	// Assert - Verify all tasks completed and shutdown succeeded
+	got := counter.Load()
+	want := int32(10)
+	if got != want {
+		t.Errorf("task count: got = %d, want %d", got, want)
+	}
+
 	if err != nil {
 		t.Errorf("WaitShutdown failed: %v", err)
 	}
 }
 
 // TestSequencedTaskRunner_MultipleWaitShutdown tests multiple WaitShutdown calls
-// Main test items:
-// 1. Multiple goroutines can wait for shutdown
-// 2. All waiters are unblocked on Shutdown
-// 3. All WaitShutdown calls return nil
+// Given: multiple goroutines waiting on WaitShutdown for the same runner
+// When: Shutdown is called
+// Then: all waiters are unblocked and all WaitShutdown calls return nil
 func TestSequencedTaskRunner_MultipleWaitShutdown(t *testing.T) {
+	// Arrange - Setup thread pool, runner, and two waiting goroutines
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
-
 	var waiter1Done, waiter2Done atomic.Bool
 
-	// Multiple goroutines waiting
+	// Act - Start two goroutines waiting for shutdown, then trigger shutdown
 	go func() {
 		runner.WaitShutdown(context.Background())
 		waiter1Done.Store(true)
@@ -443,55 +454,61 @@ func TestSequencedTaskRunner_MultipleWaitShutdown(t *testing.T) {
 	}()
 
 	time.Sleep(50 * time.Millisecond)
-
-	// Shutdown
 	runner.Shutdown()
 
-	// Wait for both to receive
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert - Verify both waiters received shutdown signal
 	if !waiter1Done.Load() {
-		t.Error("Waiter 1 did not receive shutdown")
+		t.Error("waiter 1 done: got = false, want = true")
 	}
 	if !waiter2Done.Load() {
-		t.Error("Waiter 2 did not receive shutdown")
+		t.Error("waiter 2 done: got = false, want = true")
 	}
 }
 
 // TestSequencedTaskRunner_MultipleShutdownCalls tests multiple Shutdown calls
-// Main test items:
-// 1. Multiple Shutdown() calls are safe (idempotent)
-// 2. IsClosed() returns true after first call
+// Given: a SequencedTaskRunner
+// When: Shutdown is called multiple times
+// Then: all calls succeed (idempotent) and IsClosed returns true
 func TestSequencedTaskRunner_MultipleShutdownCalls(t *testing.T) {
+	// Arrange - Setup thread pool and runner
 	pool := newTestThreadPool()
 	pool.start()
 	defer pool.stop()
 
 	runner := NewSequencedTaskRunner(pool)
 
-	// Multiple shutdowns should be safe (idempotent)
+	// Act - Call Shutdown multiple times
 	runner.Shutdown()
 	runner.Shutdown()
 	runner.Shutdown()
 
-	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+	// Assert - Verify runner is closed
+	got := runner.IsClosed()
+	want := true
+	if got != want {
+		t.Errorf("runner closed: got = %v, want %v", got, want)
 	}
 }
 
 // TestSingleThreadTaskRunner_MultipleShutdownCalls tests multiple Shutdown calls for SingleThreadTaskRunner
-// Main test items:
-// 1. Multiple Shutdown() calls are safe (idempotent)
-// 2. IsClosed() returns true after first call
+// Given: a SingleThreadTaskRunner
+// When: Shutdown is called multiple times
+// Then: all calls succeed (idempotent) and IsClosed returns true
 func TestSingleThreadTaskRunner_MultipleShutdownCalls(t *testing.T) {
+	// Arrange - Setup runner
 	runner := NewSingleThreadTaskRunner()
 
-	// Multiple shutdowns should be safe (idempotent)
+	// Act - Call Shutdown multiple times
 	runner.Shutdown()
 	runner.Shutdown()
 	runner.Shutdown()
 
-	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+	// Assert - Verify runner is closed
+	got := runner.IsClosed()
+	want := true
+	if got != want {
+		t.Errorf("runner closed: got = %v, want %v", got, want)
 	}
 }

@@ -11,9 +11,12 @@ import (
 	"github.com/Swind/go-task-runner/core"
 )
 
-// TestSingleThreadTaskRunner_GC_TaskWithStructMethod verifies that structs
-// whose methods are posted as tasks can be garbage collected after execution.
+// TestSingleThreadTaskRunner_GC_TaskWithStructMethod verifies struct method GC
+// Given: a struct with finalizer posted as a task method to SingleThreadTaskRunner
+// When: the task completes and object goes out of scope
+// Then: the struct is garbage collected and finalizer is called
 func TestSingleThreadTaskRunner_GC_TaskWithStructMethod(t *testing.T) {
+	// Arrange - Create runner and object with finalizer
 	runner := core.NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -21,40 +24,34 @@ func TestSingleThreadTaskRunner_GC_TaskWithStructMethod(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Create a scope to ensure the struct can be collected
+	// Act - Create scope for object
 	func() {
-		// Create a struct that we want to GC
 		obj := &TestObject{
 			ID:   "single-thread-obj-1",
 			Data: make([]byte, 1024*1024), // 1MB
 		}
 
-		// Set finalizer to detect when object is GC'd
 		runtime.SetFinalizer(obj, func(o *TestObject) {
 			finalizerCalled.Store(true)
 			wg.Done()
 		})
 
-		// Post the struct's method as a task
 		runner.PostTask(obj.Process)
 
-		// Wait for task to complete
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := runner.WaitIdle(ctx); err != nil {
 			t.Fatalf("WaitIdle failed: %v", err)
 		}
-
-		// obj goes out of scope here
 	}()
 
-	// Force GC multiple times
+	// Force GC
 	for i := 0; i < 5; i++ {
 		runtime.GC()
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Wait for finalizer with timeout
+	// Wait for finalizer
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -63,17 +60,21 @@ func TestSingleThreadTaskRunner_GC_TaskWithStructMethod(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify finalizer was called
 		if !finalizerCalled.Load() {
-			t.Error("Finalizer was not called, object may not have been GC'd")
+			t.Error("finalizer called: got = false, want = true")
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("Timeout waiting for object to be GC'd")
+		t.Error("timeout waiting for object to be GC'd")
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_ClosureCapturedObjects verifies that objects
-// captured by closures can be GC'd after task execution.
+// TestSingleThreadTaskRunner_GC_ClosureCapturedObjects verifies closure-captured object GC
+// Given: 100 objects captured by task closures
+// When: tasks complete and objects go out of scope
+// Then: all 100 objects are garbage collected and finalizers called
 func TestSingleThreadTaskRunner_GC_ClosureCapturedObjects(t *testing.T) {
+	// Arrange - Create runner and objects with finalizers
 	runner := core.NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -82,7 +83,7 @@ func TestSingleThreadTaskRunner_GC_ClosureCapturedObjects(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numObjects)
 
-	// Create a scope for the objects
+	// Act - Create scope for objects
 	func() {
 		for i := 0; i < numObjects; i++ {
 			obj := &TestObject{
@@ -95,20 +96,16 @@ func TestSingleThreadTaskRunner_GC_ClosureCapturedObjects(t *testing.T) {
 				wg.Done()
 			})
 
-			// Post a closure that captures the object
 			runner.PostTask(func(ctx context.Context) {
-				_ = obj.ID // Use the object
+				_ = obj.ID
 			})
 		}
 
-		// Wait for all tasks to complete
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := runner.WaitIdle(ctx); err != nil {
 			t.Fatalf("WaitIdle failed: %v", err)
 		}
-
-		// All objects go out of scope here
 	}()
 
 	// Force GC
@@ -126,19 +123,23 @@ func TestSingleThreadTaskRunner_GC_ClosureCapturedObjects(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify all objects collected
 		collected := finalizerCount.Load()
 		if collected != numObjects {
-			t.Errorf("Expected %d objects to be GC'd, got %d", numObjects, collected)
+			t.Errorf("objects GC'd: got = %d, want = %d", collected, numObjects)
 		}
 	case <-time.After(3 * time.Second):
 		collected := finalizerCount.Load()
-		t.Errorf("Timeout: only %d/%d objects were GC'd", collected, numObjects)
+		t.Errorf("timeout: only %d/%d objects were GC'd", collected, numObjects)
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_RepeatingTaskStopped verifies that objects
-// referenced by repeating tasks can be GC'd after the task is stopped.
+// TestSingleThreadTaskRunner_GC_RepeatingTaskStopped verifies repeating task object GC
+// Given: an object captured by a repeating task
+// When: the repeating task is stopped
+// Then: the object is garbage collected and finalizer is called
 func TestSingleThreadTaskRunner_GC_RepeatingTaskStopped(t *testing.T) {
+	// Arrange - Create runner and repeating task with captured object
 	runner := core.NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -148,7 +149,7 @@ func TestSingleThreadTaskRunner_GC_RepeatingTaskStopped(t *testing.T) {
 
 	var handle core.RepeatingTaskHandle
 
-	// Create scope for the object
+	// Act - Create scope for object
 	func() {
 		obj := &TestObject{
 			ID:   "single-thread-repeating-obj",
@@ -160,21 +161,13 @@ func TestSingleThreadTaskRunner_GC_RepeatingTaskStopped(t *testing.T) {
 			wg.Done()
 		})
 
-		// Start a repeating task that captures the object
 		handle = runner.PostRepeatingTask(func(ctx context.Context) {
 			_ = obj.ID
 		}, 10*time.Millisecond)
 
-		// Let it run a few times
 		time.Sleep(50 * time.Millisecond)
-
-		// Stop the repeating task
 		handle.Stop()
-
-		// Wait for any pending execution
 		time.Sleep(50 * time.Millisecond)
-
-		// obj goes out of scope here
 	}()
 
 	// Force GC
@@ -192,36 +185,36 @@ func TestSingleThreadTaskRunner_GC_RepeatingTaskStopped(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify finalizer called
 		if !finalizerCalled.Load() {
-			t.Error("Object captured by stopped repeating task was not GC'd")
+			t.Error("finalizer called: got = false, want = true")
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("Timeout: object captured by stopped repeating task was not GC'd")
+		t.Error("timeout: object was not GC'd")
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_ShutdownClearsQueue verifies that pending
-// tasks in the channel are released when runner is shutdown and stopped.
+// TestSingleThreadTaskRunner_GC_ShutdownClearsQueue verifies pending task GC on shutdown
+// Given: 50 pending tasks in channel with captured objects
+// When: runner is shutdown and stopped
+// Then: all pending task objects are garbage collected
 func TestSingleThreadTaskRunner_GC_ShutdownClearsQueue(t *testing.T) {
+	// Arrange - Create runner and block with context-waiting task
 	runner := core.NewSingleThreadTaskRunner()
 
-	const numPendingTasks = 50 // Smaller than channel buffer to avoid blocking
+	const numPendingTasks = 50
 	var finalizerCount atomic.Int32
 	var wg sync.WaitGroup
 	wg.Add(numPendingTasks)
 
-	// Create scope for objects
+	// Act - Create scope for objects
 	func() {
-		// Block the runner with a task that checks context
 		runner.PostTask(func(ctx context.Context) {
-			// Wait for context cancellation (which happens on Shutdown)
 			<-ctx.Done()
 		})
 
-		// Give the blocking task time to start
 		time.Sleep(10 * time.Millisecond)
 
-		// Post many tasks that will be pending in the channel
 		for i := 0; i < numPendingTasks; i++ {
 			obj := &TestObject{
 				ID:   "single-thread-pending-obj",
@@ -233,26 +226,15 @@ func TestSingleThreadTaskRunner_GC_ShutdownClearsQueue(t *testing.T) {
 				wg.Done()
 			})
 
-			// Capture object in closure
 			runner.PostTask(func(ctx context.Context) {
 				_ = obj.ID
 			})
 		}
 
-		// Give tasks time to queue up in channel
 		time.Sleep(10 * time.Millisecond)
-
-		// Shutdown runner (cancels context and marks as closed)
 		runner.Shutdown()
-
-		// Wait a bit for the blocker to exit
 		time.Sleep(50 * time.Millisecond)
-
-		// Stop runner (terminates runLoop)
-		// This should cause pending tasks in channel to be abandoned
 		runner.Stop()
-
-		// All objects go out of scope here
 	}()
 
 	// Force GC
@@ -270,19 +252,23 @@ func TestSingleThreadTaskRunner_GC_ShutdownClearsQueue(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify all pending tasks collected
 		collected := finalizerCount.Load()
 		if collected != numPendingTasks {
-			t.Errorf("Expected %d pending tasks to be GC'd after shutdown, got %d", numPendingTasks, collected)
+			t.Errorf("pending tasks GC'd: got = %d, want = %d", collected, numPendingTasks)
 		}
 	case <-time.After(3 * time.Second):
 		collected := finalizerCount.Load()
-		t.Errorf("Timeout: only %d/%d pending tasks were GC'd after shutdown", collected, numPendingTasks)
+		t.Errorf("timeout: only %d/%d pending tasks were GC'd", collected, numPendingTasks)
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_TaskAndReplyPattern verifies that objects
-// captured in PostTaskAndReply can be GC'd after completion.
+// TestSingleThreadTaskRunner_GC_TaskAndReplyPattern verifies PostTaskAndReply object GC
+// Given: an object captured in both task and reply closures
+// When: task and reply complete
+// Then: the object is garbage collected and finalizer is called
 func TestSingleThreadTaskRunner_GC_TaskAndReplyPattern(t *testing.T) {
+	// Arrange - Create runners and object with finalizer
 	bgRunner := core.NewSingleThreadTaskRunner()
 	defer bgRunner.Stop()
 
@@ -293,7 +279,7 @@ func TestSingleThreadTaskRunner_GC_TaskAndReplyPattern(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Create scope for object
+	// Act - Create scope for object
 	func() {
 		obj := &TestObject{
 			ID:   "single-thread-task-reply-obj",
@@ -305,29 +291,25 @@ func TestSingleThreadTaskRunner_GC_TaskAndReplyPattern(t *testing.T) {
 			wg.Done()
 		})
 
-		// Use object in task and reply
 		done := make(chan struct{})
 		uiRunner.PostTask(func(ctx context.Context) {
 			bgRunner.PostTaskAndReply(
 				func(ctx context.Context) {
-					_ = obj.ID // Use in background task
+					_ = obj.ID
 				},
 				func(ctx context.Context) {
-					_ = obj.ID // Use in reply
+					_ = obj.ID
 					close(done)
 				},
 				uiRunner,
 			)
 		})
 
-		// Wait for task and reply to complete
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
-			t.Fatal("Timeout waiting for task and reply")
+			t.Fatal("timeout waiting for task and reply")
 		}
-
-		// obj goes out of scope here
 	}()
 
 	// Force GC
@@ -345,17 +327,21 @@ func TestSingleThreadTaskRunner_GC_TaskAndReplyPattern(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify finalizer called
 		if !finalizerCalled.Load() {
-			t.Error("Object in PostTaskAndReply was not GC'd")
+			t.Error("finalizer called: got = false, want = true")
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("Timeout: object in PostTaskAndReply was not GC'd")
+		t.Error("timeout: object was not GC'd")
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_DelayedTask verifies that objects captured
-// in delayed tasks can be GC'd after the task executes.
+// TestSingleThreadTaskRunner_GC_DelayedTask verifies delayed task object GC
+// Given: an object captured by a delayed task
+// When: the delayed task executes
+// Then: the object is garbage collected and finalizer is called
 func TestSingleThreadTaskRunner_GC_DelayedTask(t *testing.T) {
+	// Arrange - Create runner and delayed task with captured object
 	runner := core.NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -363,7 +349,7 @@ func TestSingleThreadTaskRunner_GC_DelayedTask(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Create scope for object
+	// Act - Create scope for object
 	func() {
 		obj := &TestObject{
 			ID:   "single-thread-delayed-obj",
@@ -375,21 +361,17 @@ func TestSingleThreadTaskRunner_GC_DelayedTask(t *testing.T) {
 			wg.Done()
 		})
 
-		// Post delayed task
 		done := make(chan struct{})
 		runner.PostDelayedTask(func(ctx context.Context) {
 			_ = obj.ID
 			close(done)
 		}, 50*time.Millisecond)
 
-		// Wait for task to execute
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
-			t.Fatal("Timeout waiting for delayed task")
+			t.Fatal("timeout waiting for delayed task")
 		}
-
-		// obj goes out of scope here
 	}()
 
 	// Force GC
@@ -407,21 +389,25 @@ func TestSingleThreadTaskRunner_GC_DelayedTask(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify finalizer called
 		if !finalizerCalled.Load() {
-			t.Error("Object in delayed task was not GC'd")
+			t.Error("finalizer called: got = false, want = true")
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("Timeout: object in delayed task was not GC'd")
+		t.Error("timeout: object was not GC'd")
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_MemoryGrowth performs a stress test to verify
-// that memory doesn't grow unbounded when posting many tasks.
+// TestSingleThreadTaskRunner_GC_MemoryGrowth verifies no unbounded memory growth
+// Given: a SingleThreadTaskRunner executing 1000 tasks with 100KB allocations each
+// When: all tasks complete and GC runs
+// Then: memory growth is less than 10MB (no memory leak)
 func TestSingleThreadTaskRunner_GC_MemoryGrowth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping memory growth test in short mode")
 	}
 
+	// Arrange - Create runner
 	runner := core.NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -430,16 +416,14 @@ func TestSingleThreadTaskRunner_GC_MemoryGrowth(t *testing.T) {
 	var m1 runtime.MemStats
 	runtime.ReadMemStats(&m1)
 
-	// Post many tasks that allocate memory
+	// Act - Post many tasks that allocate memory
 	const iterations = 1000
 	for i := 0; i < iterations; i++ {
-		// Create a large object in each task
 		runner.PostTask(func(ctx context.Context) {
 			data := make([]byte, 100*1024) // 100KB
-			_ = data[0]                    // Use it
+			_ = data[0]
 		})
 
-		// Periodically wait for tasks to complete
 		if i%100 == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			runner.WaitIdle(ctx)
@@ -462,40 +446,37 @@ func TestSingleThreadTaskRunner_GC_MemoryGrowth(t *testing.T) {
 	var m2 runtime.MemStats
 	runtime.ReadMemStats(&m2)
 
-	// Calculate memory growth (handle case where GC reduced memory)
 	var allocated int64
 	if m2.Alloc > m1.Alloc {
 		allocated = int64(m2.Alloc - m1.Alloc)
 	} else {
 		allocated = -int64(m1.Alloc - m2.Alloc)
 	}
-	totalAllocated := m2.TotalAlloc - m1.TotalAlloc
+
+	// Assert - Verify memory growth is acceptable
+	maxAcceptableGrowth := int64(10 * 1024 * 1024) // 10MB
+	if allocated > maxAcceptableGrowth {
+		t.Errorf("memory growth: got = %d MB (max acceptable: %d MB)",
+			allocated/1024/1024, maxAcceptableGrowth/1024/1024)
+		t.Error("Possible memory leak detected")
+	}
 
 	t.Logf("Memory stats:")
 	t.Logf("  Initial Alloc: %d MB", m1.Alloc/1024/1024)
 	t.Logf("  Final Alloc: %d MB", m2.Alloc/1024/1024)
 	t.Logf("  Growth: %d MB", allocated/1024/1024)
-	t.Logf("  Total allocated during test: %d MB", totalAllocated/1024/1024)
-	t.Logf("  GC runs: %d", m2.NumGC-m1.NumGC)
-
-	// We allocated 100MB total (1000 * 100KB), but after GC,
-	// the retained memory should be much smaller
-	maxAcceptableGrowth := int64(10 * 1024 * 1024) // 10MB
-	if allocated > maxAcceptableGrowth {
-		t.Errorf("Memory growth too large: %d MB (max acceptable: %d MB)",
-			allocated/1024/1024, maxAcceptableGrowth/1024/1024)
-		t.Error("Possible memory leak detected")
-	}
 }
 
-// TestSingleThreadTaskRunner_GC_RunnerItself verifies that a SingleThreadTaskRunner
-// can be GC'd after it's stopped and no longer referenced.
+// TestSingleThreadTaskRunner_GC_RunnerItself verifies runner can be GC'd
+// Given: a SingleThreadTaskRunner that has executed tasks and been stopped
+// When: all references are dropped
+// Then: the runner is garbage collected and finalizer is called
 func TestSingleThreadTaskRunner_GC_RunnerItself(t *testing.T) {
 	var finalizerCalled atomic.Bool
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Create scope for runner
+	// Act - Create scope for runner
 	func() {
 		runner := core.NewSingleThreadTaskRunner()
 
@@ -504,18 +485,13 @@ func TestSingleThreadTaskRunner_GC_RunnerItself(t *testing.T) {
 			wg.Done()
 		})
 
-		// Post and execute a task
 		done := make(chan struct{})
 		runner.PostTask(func(ctx context.Context) {
 			close(done)
 		})
 
 		<-done
-
-		// Stop runner
 		runner.Stop()
-
-		// runner goes out of scope here
 	}()
 
 	// Force GC
@@ -533,18 +509,21 @@ func TestSingleThreadTaskRunner_GC_RunnerItself(t *testing.T) {
 
 	select {
 	case <-done:
+		// Assert - Verify runner was GC'd
 		if !finalizerCalled.Load() {
-			t.Error("SingleThreadTaskRunner itself was not GC'd")
+			t.Error("runner GC'd: got = false, want = true")
 		}
 	case <-time.After(2 * time.Second):
-		t.Error("Timeout: SingleThreadTaskRunner itself was not GC'd")
+		t.Error("timeout: runner was not GC'd")
 	}
 }
 
-// TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup verifies that
-// the dedicated goroutine properly terminates and doesn't prevent GC.
+// TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup verifies goroutine cleanup
+// Given: 10 SingleThreadTaskRunners with dedicated goroutines
+// When: all runners are stopped and references dropped
+// Then: goroutines are properly cleaned up (no goroutine leak)
 func TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup(t *testing.T) {
-	// Track goroutine count
+	// Arrange - Track goroutine count
 	initialGoroutines := runtime.NumGoroutine()
 
 	const numRunners = 10
@@ -554,7 +533,6 @@ func TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup(t *testing.T) {
 	for i := 0; i < numRunners; i++ {
 		runners[i] = core.NewSingleThreadTaskRunner()
 
-		// Post a task to ensure runner is active
 		done := make(chan struct{})
 		runners[i].PostTask(func(ctx context.Context) {
 			close(done)
@@ -562,29 +540,22 @@ func TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup(t *testing.T) {
 		<-done
 	}
 
-	// Should have created new goroutines
+	// Act - Stop all runners and clear references
 	afterCreateGoroutines := runtime.NumGoroutine()
 	createdGoroutines := afterCreateGoroutines - initialGoroutines
-	if createdGoroutines < numRunners {
-		t.Logf("Warning: Expected at least %d new goroutines, got %d", numRunners, createdGoroutines)
-	}
 
-	// Stop all runners
 	for _, runner := range runners {
 		runner.Stop()
 	}
-
-	// Clear references
 	runners = nil
 
-	// Wait a bit and force GC
 	time.Sleep(100 * time.Millisecond)
 	for i := 0; i < 5; i++ {
 		runtime.GC()
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Check that goroutines have been cleaned up
+	// Assert - Verify goroutines cleaned up
 	finalGoroutines := runtime.NumGoroutine()
 
 	t.Logf("Goroutine count:")
@@ -592,10 +563,9 @@ func TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup(t *testing.T) {
 	t.Logf("  After creating %d runners: %d (+%d)", numRunners, afterCreateGoroutines, createdGoroutines)
 	t.Logf("  After stopping and GC: %d", finalGoroutines)
 
-	// Allow some tolerance for background goroutines
 	tolerance := 5
 	if finalGoroutines > initialGoroutines+tolerance {
-		t.Errorf("Goroutines not properly cleaned up: started with %d, now have %d (expected ≤ %d)",
+		t.Errorf("goroutines leaked: started with %d, now have %d (expected <= %d)",
 			initialGoroutines, finalGoroutines, initialGoroutines+tolerance)
 		t.Error("Possible goroutine leak in SingleThreadTaskRunner")
 	}

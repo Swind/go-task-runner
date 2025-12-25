@@ -7,13 +7,12 @@ import (
 )
 
 // TestPriorityTaskScheduler_ExecutionOrder tests priority-based task execution order
-// Main test items:
-// 1. High priority tasks execute before medium priority
-// 2. Medium priority tasks execute before low priority
-// 3. Tasks with same priority execute in FIFO order
+// Given: a PriorityTaskScheduler with tasks posted at different priorities
+// When: GetWork is called to retrieve tasks
+// Then: tasks are returned in priority order (High > Medium > Low) with FIFO within each priority
 func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
+	// Arrange - Create scheduler and helper function
 	s := NewPriorityTaskScheduler(1)
-
 	results := make(chan string, 10)
 	makeTask := func(cat string) Task {
 		return func(ctx context.Context) {
@@ -21,7 +20,7 @@ func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 		}
 	}
 
-	// Post tasks
+	// Act - Post tasks with different priorities
 	s.PostInternal(makeTask("Low-1"), TaskTraits{Priority: TaskPriorityBestEffort})
 	s.PostInternal(makeTask("High-1"), TaskTraits{Priority: TaskPriorityUserBlocking})
 	s.PostInternal(makeTask("Med-1"), TaskTraits{Priority: TaskPriorityUserVisible})
@@ -31,29 +30,28 @@ func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 	expected := []string{"High-1", "High-2", "Med-1", "Low-1", "Low-2"}
 	stopCh := make(chan struct{})
 
+	// Assert - Verify tasks are returned in priority order
 	for i, exp := range expected {
 		task, ok := s.GetWork(stopCh)
 		if !ok {
-			t.Fatalf("Step %d: expected task but got none", i)
+			t.Fatalf("step %d: expected task but got none", i)
 		}
-		// Execute to get the value
 		task(context.Background())
 
 		got := <-results
 		if got != exp {
-			t.Errorf("Step %d: Expected %s, got %s", i, exp, got)
+			t.Errorf("step %d: task order: got = %s, want = %s", i, got, exp)
 		}
 	}
 }
 
 // TestFIFOTaskScheduler_ExecutionOrder tests FIFO execution order (ignores priority)
-// Main test items:
-// 1. Tasks execute in insertion order
-// 2. Priority is ignored
-// 3. First-in, First-out order is maintained
+// Given: a FIFOTaskScheduler with tasks posted at different priorities
+// When: GetWork is called to retrieve tasks
+// Then: tasks are returned in insertion order, ignoring priority
 func TestFIFOTaskScheduler_ExecutionOrder(t *testing.T) {
+	// Arrange - Create FIFO scheduler and helper function
 	s := NewFIFOTaskScheduler(1)
-
 	results := make(chan string, 10)
 	makeTask := func(cat string) Task {
 		return func(ctx context.Context) {
@@ -61,127 +59,141 @@ func TestFIFOTaskScheduler_ExecutionOrder(t *testing.T) {
 		}
 	}
 
-	// Post tasks with mixed priorities.
-	// FIFO Scheduler should IGNORE priority and use insertion order.
-
-	// 1. High Priority but first
+	// Act - Post tasks with mixed priorities (should be ignored)
 	s.PostInternal(makeTask("First-High"), TaskTraits{Priority: TaskPriorityUserBlocking})
-	// 2. Low Priority but second
 	s.PostInternal(makeTask("Second-Low"), TaskTraits{Priority: TaskPriorityBestEffort})
-	// 3. Medium
 	s.PostInternal(makeTask("Third-Med"), TaskTraits{Priority: TaskPriorityUserVisible})
 
 	expected := []string{"First-High", "Second-Low", "Third-Med"}
 	stopCh := make(chan struct{})
 
+	// Assert - Verify tasks are returned in insertion order
 	for i, exp := range expected {
 		task, ok := s.GetWork(stopCh)
 		if !ok {
-			t.Fatalf("Step %d: expected task but got none", i)
+			t.Fatalf("step %d: expected task but got none", i)
 		}
 		task(context.Background())
 
 		got := <-results
 		if got != exp {
-			t.Errorf("Step %d: Expected %s, got %s", i, exp, got)
+			t.Errorf("step %d: task order: got = %s, want = %s", i, got, exp)
 		}
 	}
 }
 
 // TestTaskScheduler_Metrics tests scheduler metric reporting
-// Main test items:
-// 1. WorkerCount returns configured worker count
-// 2. QueuedTaskCount reports queued tasks accurately
-// 3. ActiveTaskCount reports active tasks accurately
+// Given: a TaskScheduler with 2 workers
+// When: tasks are posted, retrieved, and execution callbacks are invoked
+// Then: WorkerCount, QueuedTaskCount, and ActiveTaskCount return accurate values
 func TestTaskScheduler_Metrics(t *testing.T) {
+	// Arrange - Create scheduler with 2 workers
 	s := NewPriorityTaskScheduler(2)
 
-	if s.WorkerCount() != 2 {
-		t.Errorf("Expected WorkerCount 2, got %d", s.WorkerCount())
+	// Assert initial WorkerCount
+	gotWorkers := s.WorkerCount()
+	wantWorkers := 2
+	if gotWorkers != wantWorkers {
+		t.Errorf("WorkerCount: got = %d, want = %d", gotWorkers, wantWorkers)
 	}
 
 	noop := func(ctx context.Context) {}
 
-	// Initial State
-	if s.QueuedTaskCount() != 0 {
-		t.Errorf("Expected QueuedTaskCount 0, got %d", s.QueuedTaskCount())
-	}
-	if s.ActiveTaskCount() != 0 {
-		t.Errorf("Expected ActiveTaskCount 0, got %d", s.ActiveTaskCount())
+	// Assert initial state
+	gotQueued := s.QueuedTaskCount()
+	wantQueued := 0
+	if gotQueued != wantQueued {
+		t.Errorf("QueuedTaskCount initial: got = %d, want = %d", gotQueued, wantQueued)
 	}
 
-	// Post tasks
+	gotActive := s.ActiveTaskCount()
+	wantActive := 0
+	if gotActive != wantActive {
+		t.Errorf("ActiveTaskCount initial: got = %d, want = %d", gotActive, wantActive)
+	}
+
+	// Act - Post 2 tasks
 	s.PostInternal(noop, DefaultTaskTraits())
 	s.PostInternal(noop, DefaultTaskTraits())
 
-	if s.QueuedTaskCount() != 2 {
-		t.Errorf("Expected QueuedTaskCount 2, got %d", s.QueuedTaskCount())
+	// Assert after posting
+	gotQueued = s.QueuedTaskCount()
+	wantQueued = 2
+	if gotQueued != wantQueued {
+		t.Errorf("QueuedTaskCount after post: got = %d, want = %d", gotQueued, wantQueued)
 	}
 
-	// Simulate Worker picking up a task
+	// Act - Simulate worker picking up a task
 	stopCh := make(chan struct{})
 	_, ok := s.GetWork(stopCh)
 	if !ok {
-		t.Fatal("Failed to get work")
+		t.Fatal("failed to get work from scheduler")
 	}
 
-	if s.QueuedTaskCount() != 1 {
-		t.Errorf("Expected QueuedTaskCount 1 (after pop), got %d", s.QueuedTaskCount())
+	// Assert after popping task
+	gotQueued = s.QueuedTaskCount()
+	wantQueued = 1
+	if gotQueued != wantQueued {
+		t.Errorf("QueuedTaskCount after pop: got = %d, want = %d", gotQueued, wantQueued)
 	}
 
-	// Simulate execution callbacks
+	// Act - Simulate execution callbacks
 	s.OnTaskStart()
-	if s.ActiveTaskCount() != 1 {
-		t.Errorf("Expected ActiveTaskCount 1, got %d", s.ActiveTaskCount())
+
+	gotActive = s.ActiveTaskCount()
+	wantActive = 1
+	if gotActive != wantActive {
+		t.Errorf("ActiveTaskCount after OnTaskStart: got = %d, want = %d", gotActive, wantActive)
 	}
 
 	s.OnTaskEnd()
-	if s.ActiveTaskCount() != 0 {
-		t.Errorf("Expected ActiveTaskCount 0, got %d", s.ActiveTaskCount())
+
+	// Assert after task completion
+	gotActive = s.ActiveTaskCount()
+	wantActive = 0
+	if gotActive != wantActive {
+		t.Errorf("ActiveTaskCount after OnTaskEnd: got = %d, want = %d", gotActive, wantActive)
 	}
 }
 
 // TestTaskScheduler_Shutdown tests immediate shutdown behavior
-// Main test items:
-// 1. Shutdown() clears the queue
-// 2. New tasks are rejected after shutdown
+// Given: a TaskScheduler with 1 queued task
+// When: Shutdown is called
+// Then: the queue is cleared and new tasks are rejected
 func TestTaskScheduler_Shutdown(t *testing.T) {
+	// Arrange - Create scheduler and post a task
 	s := NewPriorityTaskScheduler(1)
 	noop := func(ctx context.Context) {}
-
 	s.PostInternal(noop, DefaultTaskTraits())
-	if s.QueuedTaskCount() != 1 {
-		t.Fatal("Setup failed: should have 1 task")
+
+	gotQueued := s.QueuedTaskCount()
+	wantQueued := 1
+	if gotQueued != wantQueued {
+		t.Fatalf("setup failed: QueuedTaskCount: got = %d, want = %d", gotQueued, wantQueued)
 	}
 
+	// Act - Shutdown the scheduler
 	s.Shutdown()
 
-	// Should reject new tasks
+	// Assert - Verify new tasks are rejected
 	s.PostInternal(noop, DefaultTaskTraits())
-	if s.QueuedTaskCount() != 1 {
-		t.Errorf("Shutdown failed: accepted new task (count: %d)", s.QueuedTaskCount())
+	gotQueued = s.QueuedTaskCount()
+	wantQueued = 1
+	if gotQueued != wantQueued {
+		t.Errorf("after shutdown: QueuedTaskCount: got = %d, want = %d (task rejected)", gotQueued, wantQueued)
 	}
 }
 
 // TestTaskScheduler_DelayedTask tests delayed task execution
-// Main test items:
-// 1. Delayed task executes after specified delay
-// 2. DelayedTaskCount is updated correctly
-// 3. Task is posted to target runner after delay
+// Given: a TaskScheduler with a delayed task posted (50ms delay)
+// When: time elapses beyond the delay
+// Then: the delayed task executes and DelayedTaskCount is updated correctly
 func TestTaskScheduler_DelayedTask(t *testing.T) {
+	// Arrange - Create scheduler and mock runner
 	s := NewPriorityTaskScheduler(1)
-	// We need a helper to act as the target runner for delayed tasks
-	// In this test, we can use the scheduler itself?
-	// The scheduler needs to implement TaskRunner interface to be a target?
-	// Currently TaskScheduler struct doesn't strictly implement TaskRunner interface methods (PostTask etc are on Runner wrapper, here loop target is passed)
-	// Wait, PostDelayedInternal signature: target TaskRunner
-	// We need a dummy TaskRunner that pipes back to our check or queue.
-
 	resultCh := make(chan string, 1)
 	mockRunner := &MockTaskRunner{
 		PostInternalFunc: func(task Task, traits TaskTraits) {
-			// When delayed task is ripe, it calls target.PostTaskWithTraits
-			// Here we verify it was called
 			resultCh <- "executed"
 		},
 	}
@@ -189,36 +201,39 @@ func TestTaskScheduler_DelayedTask(t *testing.T) {
 	task := func(ctx context.Context) {}
 	delay := 50 * time.Millisecond
 
+	// Act - Post delayed task
 	s.PostDelayedInternal(task, delay, DefaultTaskTraits(), mockRunner)
 
-	if s.DelayedTaskCount() != 1 {
-		t.Errorf("Expected DelayedTaskCount 1, got %d", s.DelayedTaskCount())
+	// Assert immediate state
+	gotDelayed := s.DelayedTaskCount()
+	wantDelayed := 1
+	if gotDelayed != wantDelayed {
+		t.Errorf("DelayedTaskCount after post: got = %d, want = %d", gotDelayed, wantDelayed)
 	}
 
-	// Check immediate execution (should not happen)
+	// Assert - Verify task hasn't executed immediately
 	select {
 	case <-resultCh:
-		t.Fatal("Delayed task executed too early")
+		t.Fatal("delayed task executed too early")
 	default:
 	}
 
-	// Wait for delay + buffer
+	// Act - Wait for delay to elapse
 	time.Sleep(100 * time.Millisecond)
 
-	// Should be executed now
+	// Assert - Verify task executed after delay
 	select {
 	case <-resultCh:
-		// Success
+		// Success - task executed
 	default:
-		// t.Fatal("Delayed task did not execute in time")
-		// Note: Detailed check might fail if run in very slow generic environment, but 50ms vs 100ms should be safe.
+		// t.Fatal("delayed task did not execute in time")
 	}
 
-	// Metric should be decremented.
-	// Note: DelayedTaskCount is decremented BEFORE calling target.PostTaskWithTraits in DelayManager
-	// so it should be 0 now.
-	if s.DelayedTaskCount() != 0 {
-		t.Errorf("Expected DelayedTaskCount 0, got %d", s.DelayedTaskCount())
+	// Assert - Verify DelayedTaskCount decremented
+	gotDelayed = s.DelayedTaskCount()
+	wantDelayed = 0
+	if gotDelayed != wantDelayed {
+		t.Errorf("DelayedTaskCount after execution: got = %d, want = %d", gotDelayed, wantDelayed)
 	}
 }
 
@@ -262,44 +277,48 @@ func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }
 // =============================================================================
 
 // TestTaskScheduler_ShutdownGraceful_EmptyQueue tests graceful shutdown with no pending tasks
-// Main test items:
-// 1. ShutdownGraceful completes immediately when queue is empty
-// 2. New tasks are rejected after graceful shutdown
+// Given: a TaskScheduler with an empty queue
+// When: ShutdownGraceful is called with 1 second timeout
+// Then: shutdown completes immediately and new tasks are rejected
 func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
+	// Arrange - Create scheduler with empty queue
 	s := NewPriorityTaskScheduler(2)
 
-	// No tasks queued, should shutdown immediately
+	// Act - Call ShutdownGraceful (should complete immediately)
 	err := s.ShutdownGraceful(1 * time.Second)
+
+	// Assert - Verify shutdown succeeded
 	if err != nil {
 		t.Fatalf("ShutdownGraceful failed: %v", err)
 	}
 
-	// Should reject new tasks
+	// Assert - Verify new tasks are rejected
 	s.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
-	if s.QueuedTaskCount() != 0 {
-		t.Error("ShutdownGraceful should reject new tasks")
+	gotQueued := s.QueuedTaskCount()
+	wantQueued := 0
+	if gotQueued != wantQueued {
+		t.Errorf("after ShutdownGraceful: QueuedTaskCount: got = %d, want = %d", gotQueued, wantQueued)
 	}
 }
 
 // TestTaskScheduler_ShutdownGraceful_WithActiveTasks tests graceful shutdown with active tasks
-// Main test items:
-// 1. ShutdownGraceful waits for active tasks to complete
-// 2. Returns nil when all active tasks finish
-// 3. ActiveTaskCount is 0 after shutdown
+// Given: a TaskScheduler with 3 simulated active tasks
+// When: ShutdownGraceful is called and tasks complete in background
+// Then: ShutdownGraceful waits for active tasks and returns nil when all complete
 func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
+	// Arrange - Create scheduler and simulate 3 active tasks
 	s := NewFIFOTaskScheduler(2)
-
-	// Simulate active tasks directly (without going through queue)
-	// This simulates tasks that have already been picked up by workers
 	for i := 0; i < 3; i++ {
 		s.OnTaskStart()
 	}
 
-	if s.ActiveTaskCount() != 3 {
-		t.Fatalf("Setup failed: expected 3 active tasks, got %d", s.ActiveTaskCount())
+	gotActive := s.ActiveTaskCount()
+	wantActive := 3
+	if gotActive != wantActive {
+		t.Fatalf("setup failed: ActiveTaskCount: got = %d, want = %d", gotActive, wantActive)
 	}
 
-	// Complete the tasks in background
+	// Complete tasks in background
 	go func() {
 		for i := 0; i < 3; i++ {
 			time.Sleep(20 * time.Millisecond)
@@ -307,13 +326,13 @@ func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
 		}
 	}()
 
-	// Start graceful shutdown - should wait for active tasks to complete
+	// Act - Start graceful shutdown (should wait for active tasks)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.ShutdownGraceful(1 * time.Second)
 	}()
 
-	// Wait for shutdown to complete
+	// Assert - Verify shutdown completes successfully
 	select {
 	case err := <-errCh:
 		if err != nil {
@@ -323,66 +342,73 @@ func TestTaskScheduler_ShutdownGraceful_WithActiveTasks(t *testing.T) {
 		t.Error("ShutdownGraceful timed out")
 	}
 
-	// All tasks should have been "completed"
-	if s.ActiveTaskCount() != 0 {
-		t.Errorf("Expected 0 active tasks after shutdown, got %d", s.ActiveTaskCount())
+	// Assert - Verify all tasks completed
+	gotActive = s.ActiveTaskCount()
+	wantActive = 0
+	if gotActive != wantActive {
+		t.Errorf("after shutdown: ActiveTaskCount: got = %d, want = %d", gotActive, wantActive)
 	}
 }
 
 // TestTaskScheduler_ShutdownGraceful_Timeout tests graceful shutdown timeout behavior
-// Main test items:
-// 1. ShutdownGraceful returns error when timeout occurs
-// 2. Queue is cleared even when timeout happens
+// Given: a TaskScheduler with an active task that never completes
+// When: ShutdownGraceful is called with a short timeout
+// Then: ShutdownGraceful returns error and queue is cleared despite timeout
 func TestTaskScheduler_ShutdownGraceful_Timeout(t *testing.T) {
+	// Arrange - Create scheduler with a task that never completes
 	s := NewFIFOTaskScheduler(1)
+	s.OnTaskStart() // Simulate active task
 
-	// Simulate a task that never completes
-	s.OnTaskStart() // Mark a task as active
-
-	// Shutdown with short timeout - should timeout waiting for active task
+	// Act - Shutdown with short timeout (should timeout waiting for active task)
 	err := s.ShutdownGraceful(50 * time.Millisecond)
+
+	// Assert - Verify timeout error occurred
 	if err == nil {
-		t.Error("Expected timeout error, got nil")
+		t.Error("timeout error: got = nil, want = non-nil error")
 	}
 
-	// Verify queue was cleared despite timeout
-	if s.QueuedTaskCount() != 0 {
-		t.Errorf("Expected queue to be cleared after timeout, got %d", s.QueuedTaskCount())
+	// Assert - Verify queue was cleared despite timeout
+	gotQueued := s.QueuedTaskCount()
+	wantQueued := 0
+	if gotQueued != wantQueued {
+		t.Errorf("after timeout: QueuedTaskCount: got = %d, want = %d", gotQueued, wantQueued)
 	}
 }
 
 // TestTaskScheduler_ShutdownImmediateVsGraceful tests immediate vs graceful shutdown
-// Main test items:
-// 1. Immediate Shutdown() clears queue without waiting
-// 2. Graceful ShutdownGraceful() waits for active tasks
-// 3. Both methods prevent new tasks from being added
+// Given: two TaskSchedulers with queued/active tasks
+// When: one scheduler uses Shutdown() and another uses ShutdownGraceful()
+// Then: Shutdown clears queue immediately, ShutdownGraceful waits for active tasks
 func TestTaskScheduler_ShutdownImmediateVsGraceful(t *testing.T) {
-	// Test immediate shutdown - clears queue immediately
+	// Arrange - Test immediate shutdown
 	s1 := NewFIFOTaskScheduler(1)
 	s1.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
 	s1.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
 
+	// Act - Immediate shutdown
 	s1.Shutdown()
-	// Queue should be cleared, but note: metricQueued may not be reset
-	// This tests that Shutdown() doesn't block
 
-	// Test graceful shutdown - waits for active tasks to complete
+	// Arrange - Test graceful shutdown
 	s2 := NewFIFOTaskScheduler(1)
-	s2.OnTaskStart() // Simulate one active task
+	s2.OnTaskStart() // Simulate active task
 
-	// Complete the task in background
+	// Complete task in background
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		s2.OnTaskEnd()
 	}()
 
-	// Graceful shutdown should wait and complete successfully
+	// Act - Graceful shutdown (should wait)
 	err := s2.ShutdownGraceful(500 * time.Millisecond)
+
+	// Assert - Verify graceful shutdown succeeded
 	if err != nil {
 		t.Errorf("Graceful shutdown failed: %v", err)
 	}
 
-	if s2.ActiveTaskCount() != 0 {
-		t.Errorf("Expected 0 active tasks after graceful shutdown, got %d", s2.ActiveTaskCount())
+	gotActive := s2.ActiveTaskCount()
+	wantActive := 0
+	if gotActive != wantActive {
+		t.Errorf("after graceful shutdown: ActiveTaskCount: got = %d, want = %d", gotActive, wantActive)
 	}
 }

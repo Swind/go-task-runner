@@ -5,65 +5,50 @@ import (
 	"testing"
 )
 
-// TestPriorityTaskQueue_Stability tests priority queue stability
-// Main test items:
-// 1. Verifies tasks execute in priority order (UserBlocking > UserVisible > BestEffort)
-// 2. Verifies same-priority tasks execute in FIFO order
-// 3. Confirms queue behaves correctly with mixed priority tasks
+// TestPriorityTaskQueue_Stability verifies priority-based task ordering
+// Given: A priority queue with mixed-priority tasks
+// When: Tasks are popped from the queue
+// Then: Tasks execute in priority order (UserBlocking > UserVisible > BestEffort) with FIFO for same priority
 func TestPriorityTaskQueue_Stability(t *testing.T) {
+	// Arrange
 	q := NewPriorityTaskQueue()
-
-	// Helper to create a dummy task
 	noop := func(ctx context.Context) {}
 
-	// Push tasks with mixed priorities
-	// Expectations:
-	// Priority UserBlocking (2) -> First
-	// Priority UserVisible (1) -> Second
-	// Priority BestEffort (0) -> Third
-
+	// Act - Push tasks with mixed priorities
 	// Within same priority, order should be FIFO
+	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})   // Low Priority 1
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking}) // High Priority 1
+	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})   // Low Priority 2
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking}) // High Priority 2
+	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})  // Medium Priority
 
-	// 1. Push Low Priority 1
-	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
-	// 2. Push High Priority 1
-	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
-	// 3. Push Low Priority 2
-	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
-	// 4. Push High Priority 2
-	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
-	// 5. Push Medium Priority
-	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
-
-	// Expected Order by Priority:
-	// UserBlocking (2), UserBlocking (2), UserVisible (1), BestEffort (0), BestEffort (0)
+	// Expected Order: UserBlocking(2), UserBlocking(2), UserVisible(1), BestEffort(0), BestEffort(0)
 	expectedPriorities := []TaskPriority{
-		TaskPriorityUserBlocking, // High-1
-		TaskPriorityUserBlocking, // High-2
-		TaskPriorityUserVisible,  // Med-1
-		TaskPriorityBestEffort,   // Low-1
-		TaskPriorityBestEffort,   // Low-2
+		TaskPriorityUserBlocking,
+		TaskPriorityUserBlocking,
+		TaskPriorityUserVisible,
+		TaskPriorityBestEffort,
+		TaskPriorityBestEffort,
 	}
 
+	// Assert - Verify priority order
 	for i, expectedPriority := range expectedPriorities {
 		item, ok := q.Pop()
 		if !ok {
-			t.Fatalf("Step %d: Expected priority %d but queue is empty", i, expectedPriority)
+			t.Fatalf("Step %d: queue is empty, want priority %d", i, expectedPriority)
 		}
 		if item.Traits.Priority != expectedPriority {
-			t.Errorf("Step %d: Expected priority %d, got %d",
-				i, expectedPriority, item.Traits.Priority)
+			t.Errorf("Step %d: priority = %d, want %d", i, item.Traits.Priority, expectedPriority)
 		}
 	}
 }
 
-// TestPriorityTaskQueue_PopUpTo tests batch task retrieval
-// Main test items:
-// 1. Verifies PopUpTo retrieves the specified number of tasks
-// 2. Confirms retrieved tasks are sorted by priority
-// 3. Verifies retrieved tasks are removed from queue
-// 4. Confirms remaining tasks stay in queue
+// TestPriorityTaskQueue_PopUpTo verifies batch task retrieval by priority
+// Given: A priority queue with 5 tasks of different priorities
+// When: PopUpTo is called with limit of 3
+// Then: Returns 3 highest priority tasks sorted by priority, 2 remain in queue
 func TestPriorityTaskQueue_PopUpTo(t *testing.T) {
+	// Arrange
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
 
@@ -74,121 +59,117 @@ func TestPriorityTaskQueue_PopUpTo(t *testing.T) {
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
 
-	// Pop up to 3 tasks (should get highest priority ones first)
+	// Act - Pop up to 3 tasks
 	tasks := q.PopUpTo(3)
 
+	// Assert - Got 3 highest priority tasks in correct order
 	if len(tasks) != 3 {
-		t.Errorf("Expected 3 tasks, got %d", len(tasks))
+		t.Errorf("len(tasks) = %d, want 3", len(tasks))
 	}
-
-	// First 2 should be UserBlocking, then UserVisible
 	if tasks[0].Traits.Priority != TaskPriorityUserBlocking {
-		t.Errorf("Expected first task to be UserBlocking, got %d", tasks[0].Traits.Priority)
+		t.Errorf("tasks[0].Priority = %d, want %d", tasks[0].Traits.Priority, TaskPriorityUserBlocking)
 	}
 	if tasks[1].Traits.Priority != TaskPriorityUserBlocking {
-		t.Errorf("Expected second task to be UserBlocking, got %d", tasks[1].Traits.Priority)
+		t.Errorf("tasks[1].Priority = %d, want %d", tasks[1].Traits.Priority, TaskPriorityUserBlocking)
 	}
 	if tasks[2].Traits.Priority != TaskPriorityUserVisible {
-		t.Errorf("Expected third task to be UserVisible, got %d", tasks[2].Traits.Priority)
+		t.Errorf("tasks[2].Priority = %d, want %d", tasks[2].Traits.Priority, TaskPriorityUserVisible)
 	}
 
-	// Queue should still have 2 remaining BestEffort tasks
+	// Assert - 2 tasks remain in queue
 	if q.Len() != 2 {
-		t.Errorf("Expected 2 remaining tasks, got %d", q.Len())
+		t.Errorf("q.Len() = %d, want 2", q.Len())
 	}
 }
 
-// TestPriorityTaskQueue_PeekTraits tests peeking at queue head task traits
-// Main test items:
-// 1. Verifies empty queue Peek returns false
-// 2. Confirms Peek correctly returns head task traits
-// 3. Verifies Peek does not remove task (non-destructive read)
-// 4. Confirms queue length unchanged after Peek
+// TestPriorityTaskQueue_PeekTraits verifies non-destructive head task inspection
+// Given: A priority queue with one task
+// When: PeekTraits is called
+// Then: Returns task traits without removing it from queue
 func TestPriorityTaskQueue_PeekTraits(t *testing.T) {
+	// Arrange
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
 
-	// Empty queue - should return false
+	// Assert - Empty queue returns false
 	_, ok := q.PeekTraits()
 	if ok {
-		t.Error("Expected false for empty queue")
+		t.Error("PeekTraits() on empty queue = true, want false")
 	}
 
-	// Push a task with specific traits
+	// Arrange - Add a task with specific traits
 	traits := TaskTraits{Priority: TaskPriorityUserBlocking}
 	q.Push(noop, traits)
 
-	// Peek should return the traits
+	// Act - Peek at the head task
 	peekedTraits, ok := q.PeekTraits()
+
+	// Assert - Got correct traits
 	if !ok {
-		t.Fatal("Expected true for non-empty queue")
+		t.Fatal("PeekTraits() on non-empty queue = false, want true")
 	}
 	if peekedTraits.Priority != TaskPriorityUserBlocking {
-		t.Errorf("Expected priority UserBlocking, got %d", peekedTraits.Priority)
+		t.Errorf("PeekTraits().Priority = %d, want %d", peekedTraits.Priority, TaskPriorityUserBlocking)
 	}
 
-	// Queue should still have the task (Peek doesn't remove)
+	// Assert - Task still in queue (Peek is non-destructive)
 	if q.Len() != 1 {
-		t.Errorf("Expected 1 task after peek, got %d", q.Len())
+		t.Errorf("q.Len() after Peek = %d, want 1", q.Len())
 	}
 }
 
-// TestPriorityTaskQueue_MaybeCompact tests memory compaction
-// Main test items:
-// 1. Verifies MaybeCompact can be called after emptying queue
-// 2. Confirms queue remains functional after compaction
-// 3. Verifies compaction doesn't affect basic operations (Push/Pop)
-// Note: For Heap implementation, MaybeCompact may be a no-op (heap auto-manages memory)
+// TestPriorityTaskQueue_MaybeCompact verifies memory compaction functionality
+// Given: A queue that has been emptied after containing 10 tasks
+// When: MaybeCompact is called
+// Then: Queue remains functional and can accept new tasks
 func TestPriorityTaskQueue_MaybeCompact(t *testing.T) {
+	// Arrange
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
 
-	// Push 10 tasks
+	// Push and pop 10 tasks to create empty queue with capacity
 	for i := 0; i < 10; i++ {
 		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
 	}
-
-	// Pop all tasks
 	for i := 0; i < 10; i++ {
 		q.Pop()
 	}
 
-	// Queue should have empty slice with capacity > 0
-	// MaybeCompact should reduce the capacity
+	// Act - Compact memory
 	q.MaybeCompact()
 
-	// Push a new task - should still work
+	// Act - Push new task
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
 
+	// Assert - Queue still functional
 	if q.Len() != 1 {
-		t.Errorf("Expected 1 task after MaybeCompact, got %d", q.Len())
+		t.Errorf("q.Len() = %d, want 1", q.Len())
 	}
 
-	// Verify it can still pop
 	item, ok := q.Pop()
 	if !ok {
-		t.Error("Failed to pop task after MaybeCompact")
+		t.Fatal("Pop() after MaybeCompact = false, want true")
 	}
 	if item.Traits.Priority != TaskPriorityUserVisible {
-		t.Errorf("Expected priority UserVisible, got %d", item.Traits.Priority)
+		t.Errorf("Pop().Priority = %d, want %d", item.Traits.Priority, TaskPriorityUserVisible)
 	}
 }
 
-// TestFIFOTaskQueue_FIFO tests FIFO queue first-in-first-out behavior
-// Main test items:
-// 1. Verifies tasks execute in insertion order (FIFO)
-// 2. Confirms priority doesn't affect execution order (FIFO queue characteristic)
-// 3. Confirms queue correctly maintains insertion order
+// TestFIFOTaskQueue_FIFO verifies first-in-first-out behavior
+// Given: A FIFO queue with 3 tasks of different priorities
+// When: Tasks are popped from the queue
+// Then: Tasks execute in insertion order regardless of priority
 func TestFIFOTaskQueue_FIFO(t *testing.T) {
+	// Arrange
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
 
-	// Push tasks - they should come out in the same order
+	// Act - Push tasks in specific order
 	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
 
-	// FIFO order should be preserved regardless of priority
+	// Assert - FIFO order preserved regardless of priority
 	expectedPriorities := []TaskPriority{
 		TaskPriorityBestEffort,
 		TaskPriorityUserVisible,
@@ -198,80 +179,76 @@ func TestFIFOTaskQueue_FIFO(t *testing.T) {
 	for i, expectedPriority := range expectedPriorities {
 		item, ok := q.Pop()
 		if !ok {
-			t.Fatalf("Step %d: Expected priority %d but queue is empty", i, expectedPriority)
+			t.Fatalf("Step %d: queue is empty, want priority %d", i, expectedPriority)
 		}
 		if item.Traits.Priority != expectedPriority {
-			t.Errorf("Step %d: Expected priority %d, got %d",
-				i, expectedPriority, item.Traits.Priority)
+			t.Errorf("Step %d: priority = %d, want %d", i, item.Traits.Priority, expectedPriority)
 		}
 	}
 }
 
-// TestPriorityTaskQueue_SequenceOverflow tests sequence overflow protection
-// Main test items:
-// 1. Simulates uint64 sequence reaching maximum value edge case
-// 2. Verifies sequence resets to 0 when queue is empty
-// 3. Confirms queue operates normally after reset
-// Note: uint64 overflow is practically impossible, this verifies defensive programming
+// TestPriorityTaskQueue_SequenceOverflow verifies uint64 sequence overflow handling
+// Given: A queue with sequence number at MaxUint64
+// When: Queue is empty and a new task is pushed
+// Then: Sequence resets to 0 and queue operates normally
 func TestPriorityTaskQueue_SequenceOverflow(t *testing.T) {
+	// Arrange
 	q := NewPriorityTaskQueue()
 	noop := func(ctx context.Context) {}
 
-	// Manually set sequence to MaxUint64 to simulate overflow scenario
+	// Set sequence to MaxUint64 to simulate overflow
 	q.mu.Lock()
 	q.nextSequence = 18446744073709551615 // MaxUint64
 	q.mu.Unlock()
 
-	// Queue should be empty at this point
+	// Assert - Queue is empty
 	if !q.IsEmpty() {
-		t.Fatal("Queue should be empty initially")
+		t.Fatal("q.IsEmpty() = false, want true")
 	}
 
-	// Push a task - sequence should reset to 0 since queue is empty
+	// Act - Push task (sequence should reset to 0)
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
 
-	// Verify the task can be popped successfully
+	// Assert - Task can be popped
 	item, ok := q.Pop()
 	if !ok {
-		t.Fatal("Failed to pop task after sequence reset")
+		t.Fatal("Pop() after sequence reset = false, want true")
 	}
-
 	if item.Traits.Priority != TaskPriorityUserVisible {
-		t.Errorf("Expected priority UserVisible, got %d", item.Traits.Priority)
+		t.Errorf("Pop().Priority = %d, want %d", item.Traits.Priority, TaskPriorityUserVisible)
 	}
 
-	// Verify queue is now empty
+	// Assert - Queue is empty
 	if !q.IsEmpty() {
-		t.Error("Queue should be empty after popping")
+		t.Error("q.IsEmpty() after Pop = false, want true")
 	}
 
-	// Push more tasks to verify normal operation continues
+	// Act - Push more tasks to verify normal operation
 	q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserBlocking})
 
-	// Should have 2 tasks
+	// Assert - Normal priority ordering
 	if q.Len() != 2 {
-		t.Errorf("Expected 2 tasks, got %d", q.Len())
+		t.Errorf("q.Len() = %d, want 2", q.Len())
 	}
 
-	// Pop should work correctly
 	item1, _ := q.Pop()
 	if item1.Traits.Priority != TaskPriorityUserBlocking {
-		t.Errorf("Expected UserBlocking first, got %d", item1.Traits.Priority)
+		t.Errorf("First pop priority = %d, want %d", item1.Traits.Priority, TaskPriorityUserBlocking)
 	}
 
 	item2, _ := q.Pop()
 	if item2.Traits.Priority != TaskPriorityBestEffort {
-		t.Errorf("Expected BestEffort second, got %d", item2.Traits.Priority)
+		t.Errorf("Second pop priority = %d, want %d", item2.Traits.Priority, TaskPriorityBestEffort)
 	}
 }
 
-// TestFIFOTaskQueue_PopUpTo tests FIFO queue batch retrieval
-// Main test items:
-// 1. Verifies PopUpTo retrieves specified number of tasks
-// 2. Confirms retrieved tasks are in FIFO order
-// 3. Verifies behavior when requesting more tasks than available
+// TestFIFOTaskQueue_PopUpTo verifies FIFO queue batch retrieval
+// Given: A FIFO queue with 5 tasks
+// When: PopUpTo(3) is called, then PopUpTo(10) is called
+// Then: First call returns 3 tasks, second returns remaining 2
 func TestFIFOTaskQueue_PopUpTo(t *testing.T) {
+	// Arrange
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
 
@@ -280,60 +257,61 @@ func TestFIFOTaskQueue_PopUpTo(t *testing.T) {
 		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
 	}
 
-	// Pop up to 3 tasks (should get first 3 in FIFO order)
+	// Act - Pop up to 3 tasks
 	tasks := q.PopUpTo(3)
 
+	// Assert - Got 3 tasks
 	if len(tasks) != 3 {
-		t.Errorf("Expected 3 tasks, got %d", len(tasks))
+		t.Errorf("len(tasks) = %d, want 3", len(tasks))
 	}
 
-	// Queue should still have 2 remaining tasks
+	// Assert - 2 tasks remain
 	if q.Len() != 2 {
-		t.Errorf("Expected 2 remaining tasks, got %d", q.Len())
+		t.Errorf("q.Len() = %d, want 2", q.Len())
 	}
 
-	// Pop the rest - should get 2 more
+	// Act - Pop the rest (request 10, only 2 available)
 	rest := q.PopUpTo(10)
+
+	// Assert - Got 2 remaining tasks
 	if len(rest) != 2 {
-		t.Errorf("Expected 2 remaining tasks, got %d", len(rest))
+		t.Errorf("len(rest) = %d, want 2", len(rest))
 	}
 }
 
-// TestFIFOTaskQueue_MaybeCompact tests FIFO queue memory compaction
-// Main test items:
-// 1. Verifies MaybeCompact can be called after emptying queue
-// 2. Confirms underlying slice capacity is reduced after compaction
-// 3. Verifies compaction doesn't affect basic queue operations
+// TestFIFOTaskQueue_MaybeCompact verifies FIFO queue memory compaction
+// Given: An emptied FIFO queue that previously held 10 tasks
+// When: MaybeCompact is called
+// Then: Underlying slice capacity is reduced and queue remains functional
 func TestFIFOTaskQueue_MaybeCompact(t *testing.T) {
+	// Arrange
 	q := NewFIFOTaskQueue()
 	noop := func(ctx context.Context) {}
 
-	// Push 10 tasks
+	// Push and pop 10 tasks
 	for i := 0; i < 10; i++ {
 		q.Push(noop, TaskTraits{Priority: TaskPriorityBestEffort})
 	}
-
-	// Pop all tasks
 	for i := 0; i < 10; i++ {
 		q.Pop()
 	}
 
-	// MaybeCompact should reduce the underlying slice capacity
+	// Act - Compact memory
 	q.MaybeCompact()
 
-	// Push a new task - should still work
+	// Act - Push new task
 	q.Push(noop, TaskTraits{Priority: TaskPriorityUserVisible})
 
+	// Assert - Queue functional
 	if q.Len() != 1 {
-		t.Errorf("Expected 1 task after MaybeCompact, got %d", q.Len())
+		t.Errorf("q.Len() = %d, want 1", q.Len())
 	}
 
-	// Verify it can still pop
 	item, ok := q.Pop()
 	if !ok {
-		t.Error("Failed to pop task after MaybeCompact")
+		t.Fatal("Pop() after MaybeCompact = false, want true")
 	}
 	if item.Traits.Priority != TaskPriorityUserVisible {
-		t.Errorf("Expected priority UserVisible, got %d", item.Traits.Priority)
+		t.Errorf("Pop().Priority = %d, want %d", item.Traits.Priority, TaskPriorityUserVisible)
 	}
 }

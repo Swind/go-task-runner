@@ -8,34 +8,36 @@ import (
 	"time"
 )
 
-// TestSingleThreadTaskRunner_BasicExecution tests basic execution functionality
-// Main test items:
-// 1. Create SingleThreadTaskRunner and submit tasks
-// 2. Verify tasks execute correctly
-// 3. Task execution flags are set correctly
+// TestSingleThreadTaskRunner_BasicExecution verifies basic task execution
+// Given: A SingleThreadTaskRunner with one task
+// When: Task is posted
+// Then: Task executes correctly
 func TestSingleThreadTaskRunner_BasicExecution(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var executed atomic.Bool
 
+	// Act
 	runner.PostTask(func(ctx context.Context) {
 		executed.Store(true)
 	})
 
 	time.Sleep(50 * time.Millisecond)
 
+	// Assert
 	if !executed.Load() {
-		t.Error("Task was not executed")
+		t.Error("executed = false, want true")
 	}
 }
 
-// TestSingleThreadTaskRunner_ExecutionOrder tests execution order
-// Main test items:
-// 1. Submit multiple tasks to SingleThreadTaskRunner
-// 2. Verify tasks execute in submission order (FIFO)
-// 3. All tasks are executed correctly
+// TestSingleThreadTaskRunner_ExecutionOrder verifies FIFO execution order
+// Given: A SingleThreadTaskRunner with 10 tasks posted sequentially
+// When: Tasks execute
+// Then: Tasks execute in submission order (FIFO)
 func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -43,6 +45,7 @@ func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
 	var mu atomic.Value
 	mu.Store(&order)
 
+	// Act - Post 10 tasks
 	for i := 0; i < 10; i++ {
 		id := i
 		runner.PostTask(func(ctx context.Context) {
@@ -53,24 +56,25 @@ func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert - All tasks executed in order
 	result := *mu.Load().(*[]int)
 	if len(result) != 10 {
-		t.Fatalf("Expected 10 tasks executed, got %d", len(result))
+		t.Fatalf("len(result) = %d, want 10", len(result))
 	}
 
 	for i := 0; i < 10; i++ {
 		if result[i] != i {
-			t.Errorf("Task order incorrect: expected %d at position %d, got %d", i, i, result[i])
+			t.Errorf("result[%d] = %d, want %d", i, result[i], i)
 		}
 	}
 }
 
-// TestSingleThreadTaskRunner_ThreadAffinity tests thread affinity
-// Main test items:
-// 1. Verify all tasks execute on the same goroutine
-// 2. Confirm thread affinity via goroutine ID
-// 3. Tasks do not switch to other goroutines during execution
+// TestSingleThreadTaskRunner_ThreadAffinity verifies all tasks run on same goroutine
+// Given: A SingleThreadTaskRunner with 20 tasks
+// When: Tasks execute
+// Then: All tasks execute on the same goroutine (thread affinity)
 func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -78,11 +82,10 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 	var mu atomic.Value
 	mu.Store(&goroutineIDs)
 
-	// Get goroutine ID helper
+	// Helper to get goroutine ID
 	getGoroutineID := func() uint64 {
 		b := make([]byte, 64)
 		b = b[:runtime.Stack(b, false)]
-		// Parse "goroutine 123 [running]:"
 		var id uint64
 		for i := len("goroutine "); i < len(b); i++ {
 			if b[i] >= '0' && b[i] <= '9' {
@@ -94,7 +97,7 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 		return id
 	}
 
-	// Post multiple tasks
+	// Act - Post 20 tasks
 	for i := 0; i < 20; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			gid := getGoroutineID()
@@ -105,152 +108,152 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert - All tasks ran on same goroutine
 	result := *mu.Load().(*map[uint64]bool)
 	if len(result) != 1 {
-		t.Errorf("Expected all tasks to run on same goroutine, but found %d different goroutines", len(result))
+		t.Errorf("goroutine count = %d, want 1 (all tasks on same goroutine)", len(result))
 	}
 }
 
-// TestSingleThreadTaskRunner_DelayedTask tests delayed task
-// Main test items:
-// 1. Submit delayed task and verify it doesn't execute immediately
-// 2. Verify task executes after delay time expires
-// 3. Verify actual delay time matches expectations
+// TestSingleThreadTaskRunner_DelayedTask verifies delayed task execution
+// Given: A SingleThreadTaskRunner with a 100ms delayed task
+// When: Task is posted with delay
+// Then: Task executes after specified delay
 func TestSingleThreadTaskRunner_DelayedTask(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var executed atomic.Bool
 	start := time.Now()
 
+	// Act
 	runner.PostDelayedTask(func(ctx context.Context) {
 		executed.Store(true)
 	}, 100*time.Millisecond)
 
-	// Should not execute immediately
+	// Assert - Not executed immediately
 	time.Sleep(50 * time.Millisecond)
 	if executed.Load() {
-		t.Error("Delayed task executed too early")
+		t.Error("executed = true during delay, want false")
 	}
 
 	// Wait for execution
 	time.Sleep(100 * time.Millisecond)
 	if !executed.Load() {
-		t.Error("Delayed task was not executed")
+		t.Error("executed = false after delay, want true")
 	}
 
 	elapsed := time.Since(start)
 	if elapsed < 100*time.Millisecond {
-		t.Errorf("Delayed task executed too early: %v", elapsed)
+		t.Errorf("elapsed = %v, want >=100ms", elapsed)
 	}
 }
 
-// TestSingleThreadTaskRunner_RepeatingTask tests repeating task
-// Main test items:
-// 1. Create repeating task
-// 2. Verify task repeats at specified interval
-// 3. Task stops executing after calling Stop
+// TestSingleThreadTaskRunner_RepeatingTask verifies repeating task functionality
+// Given: A SingleThreadTaskRunner with repeating task every 50ms
+// When: Task runs for 200ms then is stopped
+// Then: Task repeats multiple times and stops when handle.Stop() is called
 func TestSingleThreadTaskRunner_RepeatingTask(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var counter atomic.Int32
 
+	// Act
 	handle := runner.PostRepeatingTask(func(ctx context.Context) {
 		counter.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let it run a few times
 	time.Sleep(200 * time.Millisecond)
-
-	// Stop the repeating task
 	handle.Stop()
 	countAtStop := counter.Load()
 
-	// Wait and verify it stopped
 	time.Sleep(150 * time.Millisecond)
 	countAfterStop := counter.Load()
 
+	// Assert
 	if countAtStop < 2 {
-		t.Errorf("Repeating task should have run at least 2 times, got %d", countAtStop)
+		t.Errorf("countAtStop = %d, want >=2", countAtStop)
 	}
 
 	if countAfterStop > countAtStop+1 {
-		t.Errorf("Repeating task continued after stop: before=%d, after=%d", countAtStop, countAfterStop)
+		t.Errorf("countAfterStop = %d, want ~%d (task continued after stop)", countAfterStop, countAtStop)
 	}
 }
 
-// TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay tests repeating task with initial delay
-// Main test items:
-// 1. Create repeating task with initial delay
-// 2. Verify task doesn't execute during initial delay
-// 3. Verify task starts periodic execution after initial delay
+// TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay verifies repeating task with initial delay
+// Given: A repeating task with 100ms initial delay and 50ms interval
+// When: Task is posted
+// Then: Task doesn't execute during initial delay, then repeats periodically
 func TestSingleThreadTaskRunner_RepeatingTaskWithInitialDelay(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var counter atomic.Int32
 	start := time.Now()
 
+	// Act
 	handle := runner.PostRepeatingTaskWithInitialDelay(
 		func(ctx context.Context) {
 			counter.Add(1)
 		},
-		100*time.Millisecond, // Initial delay
-		50*time.Millisecond,  // Interval
+		100*time.Millisecond,
+		50*time.Millisecond,
 		DefaultTaskTraits(),
 	)
 	defer handle.Stop()
 
-	// Should not execute immediately
+	// Assert - Not executed during initial delay
 	time.Sleep(50 * time.Millisecond)
 	if counter.Load() > 0 {
-		t.Error("Repeating task with initial delay executed too early")
+		t.Error("counter > 0 during initial delay, want 0")
 	}
 
-	// Wait for initial delay + some intervals
 	time.Sleep(200 * time.Millisecond)
 
 	elapsed := time.Since(start)
 	count := counter.Load()
 
 	if count < 1 {
-		t.Error("Repeating task did not execute after initial delay")
+		t.Error("count = 0, want >=1 (task should execute after initial delay)")
 	}
 
 	if elapsed < 100*time.Millisecond {
-		t.Errorf("First execution happened before initial delay: %v", elapsed)
+		t.Errorf("elapsed = %v, want >=100ms (initial delay)", elapsed)
 	}
 }
 
-// TestSingleThreadTaskRunner_Shutdown tests shutdown functionality
-// Main test items:
-// 1. Verify runner is not closed initially
-// 2. Runner is in closed state after calling Shutdown
-// 3. IsClosed method correctly reflects closed state
+// TestSingleThreadTaskRunner_Shutdown verifies shutdown state changes
+// Given: A new SingleThreadTaskRunner
+// When: Shutdown is called
+// Then: IsClosed returns true
 func TestSingleThreadTaskRunner_Shutdown(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 
-	// Initially not closed
+	// Assert - Initially not closed
 	if runner.IsClosed() {
-		t.Error("Runner should not be closed initially")
+		t.Error("IsClosed() = true initially, want false")
 	}
 
-	// Shutdown
+	// Act
 	runner.Shutdown()
 
-	// Should be closed
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed after Shutdown()")
+		t.Error("IsClosed() = false after Shutdown(), want true")
 	}
 }
 
-// TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks tests that shutdown stops repeating tasks
-// Main test items:
-// 1. Create and start repeating task
-// 2. Call Shutdown to close runner
-// 3. Verify repeating task stops after shutdown
+// TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks verifies shutdown stops repeating tasks
+// Given: A SingleThreadTaskRunner with active repeating task
+// When: Shutdown is called
+// Then: Repeating task stops executing
 func TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 
 	var counter atomic.Int32
@@ -259,77 +262,72 @@ func TestSingleThreadTaskRunner_Shutdown_StopsRepeatingTasks(t *testing.T) {
 		counter.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let it run a few times
 	time.Sleep(150 * time.Millisecond)
 
-	// Shutdown
+	// Act
 	runner.Shutdown()
 	countAtShutdown := counter.Load()
 
-	// Wait and verify no more executions
 	time.Sleep(150 * time.Millisecond)
 	countAfterShutdown := counter.Load()
 
+	// Assert
 	if countAfterShutdown > countAtShutdown {
-		t.Errorf("Repeating task continued after shutdown: before=%d, after=%d",
-			countAtShutdown, countAfterShutdown)
+		t.Errorf("countAfterShutdown = %d, want ~%d (task stopped)", countAfterShutdown, countAtShutdown)
 	}
 }
 
-// TestSingleThreadTaskRunner_PostTaskAfterShutdown tests posting tasks after shutdown
-// Main test items:
-// 1. Shutdown runner first
-// 2. Attempt to submit tasks after shutdown
-// 3. Verify tasks submitted after shutdown are not executed
+// TestSingleThreadTaskRunner_PostTaskAfterShutdown verifies tasks rejected after shutdown
+// Given: A shut down SingleThreadTaskRunner
+// When: Task is posted
+// Then: Task does not execute
 func TestSingleThreadTaskRunner_PostTaskAfterShutdown(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	runner.Shutdown()
 
 	var executed atomic.Bool
 
-	// Post task after shutdown
+	// Act
 	runner.PostTask(func(ctx context.Context) {
 		executed.Store(true)
 	})
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Task should not execute
+	// Assert
 	if executed.Load() {
-		t.Error("Task should not execute after shutdown")
+		t.Error("executed = true after shutdown, want false")
 	}
 }
 
-// TestSingleThreadTaskRunner_Stop tests stop functionality
-// Main test items:
-// 1. Verify Stop correctly closes runner
-// 2. Tasks before stop can complete execution
-// 3. Tasks submitted after stop do not execute
+// TestSingleThreadTaskRunner_Stop verifies stop functionality
+// Given: A SingleThreadTaskRunner with one task
+// When: Stop is called after task starts
+// Then: Task completes, new tasks don't execute, runner is closed
 func TestSingleThreadTaskRunner_Stop(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 
-	// Add a task that executes immediately
 	var executed atomic.Bool
 	runner.PostTask(func(ctx context.Context) {
 		executed.Store(true)
 	})
 
-	// Let it start executing
 	time.Sleep(50 * time.Millisecond)
 
-	// Stop the runner
+	// Act
 	runner.Stop()
 
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed after Stop()")
+		t.Error("IsClosed() = false after Stop(), want true")
 	}
 
-	// The task that executed before stop should have completed
 	if !executed.Load() {
-		t.Error("Task should have completed before stop")
+		t.Error("executed = false (task before stop), want true")
 	}
 
-	// New tasks posted after stop should not execute
 	var executed2 atomic.Bool
 	runner.PostTask(func(ctx context.Context) {
 		executed2.Store(true)
@@ -337,16 +335,16 @@ func TestSingleThreadTaskRunner_Stop(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	if executed2.Load() {
-		t.Error("Task posted after stop should not execute")
+		t.Error("executed2 = true after Stop(), want false")
 	}
 }
 
-// TestSingleThreadTaskRunner_MultipleRepeatingTasks tests multiple repeating tasks
-// Main test items:
-// 1. Run multiple repeating tasks with different periods simultaneously
-// 2. Verify each task executes at its respective period
-// 3. Stop each repeating task individually
+// TestSingleThreadTaskRunner_MultipleRepeatingTasks verifies multiple repeating tasks
+// Given: A SingleThreadTaskRunner with 3 repeating tasks at different intervals
+// When: Tasks run and are stopped
+// Then: Each task executes at its interval and stops independently
 func TestSingleThreadTaskRunner_MultipleRepeatingTasks(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
@@ -364,21 +362,21 @@ func TestSingleThreadTaskRunner_MultipleRepeatingTasks(t *testing.T) {
 		counter3.Add(1)
 	}, 50*time.Millisecond)
 
-	// Let them run
+	// Act - Let them run
 	time.Sleep(200 * time.Millisecond)
 
-	// All should have executed multiple times
+	// Assert - All executed multiple times
 	if counter1.Load() < 3 {
-		t.Errorf("Task 1 should have run at least 3 times, got %d", counter1.Load())
+		t.Errorf("counter1 = %d, want >=3", counter1.Load())
 	}
 	if counter2.Load() < 2 {
-		t.Errorf("Task 2 should have run at least 2 times, got %d", counter2.Load())
+		t.Errorf("counter2 = %d, want >=2", counter2.Load())
 	}
 	if counter3.Load() < 2 {
-		t.Errorf("Task 3 should have run at least 2 times, got %d", counter3.Load())
+		t.Errorf("counter3 = %d, want >=2", counter3.Load())
 	}
 
-	// Stop all
+	// Act - Stop all
 	handle1.Stop()
 	handle2.Stop()
 	handle3.Stop()
@@ -387,86 +385,85 @@ func TestSingleThreadTaskRunner_MultipleRepeatingTasks(t *testing.T) {
 	c2 := counter2.Load()
 	c3 := counter3.Load()
 
-	// Wait and verify all stopped
 	time.Sleep(150 * time.Millisecond)
 
+	// Assert - All stopped
 	if counter1.Load() > c1+1 {
-		t.Error("Task 1 continued after stop")
+		t.Error("Task 1 continued after Stop()")
 	}
 	if counter2.Load() > c2+1 {
-		t.Error("Task 2 continued after stop")
+		t.Error("Task 2 continued after Stop()")
 	}
 	if counter3.Load() > c3+1 {
-		t.Error("Task 3 continued after stop")
+		t.Error("Task 3 continued after Stop()")
 	}
 }
 
-// TestSingleThreadTaskRunner_PanicRecovery tests panic recovery
-// Main test items:
-// 1. Submit task that will panic
-// 2. Verify subsequent tasks can still execute after panic
-// 3. Runner remains in normal operating state after panic
+// TestSingleThreadTaskRunner_PanicRecovery verifies panic recovery
+// Given: A SingleThreadTaskRunner with a task that panics
+// When: Panic occurs and another task is posted
+// Then: Subsequent tasks still execute, runner remains operational
 func TestSingleThreadTaskRunner_PanicRecovery(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var executed atomic.Bool
 
-	// Post task that panics
+	// Act - Post panicking task, then normal task
 	runner.PostTask(func(ctx context.Context) {
 		panic("test panic")
 	})
 
-	// Post task after panic
 	runner.PostTask(func(ctx context.Context) {
 		executed.Store(true)
 	})
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Second task should still execute despite panic in first task
+	// Assert - Second task executed despite panic
 	if !executed.Load() {
-		t.Error("Task after panic was not executed")
+		t.Error("executed = false after panic, want true")
 	}
 
-	// Runner should still be operational
 	if runner.IsClosed() {
-		t.Error("Runner should not be closed after panic")
+		t.Error("IsClosed() = true after panic, want false")
 	}
 }
 
-// TestSingleThreadTaskRunner_IdempotentShutdown tests idempotent shutdown
-// Main test items:
-// 1. Call Shutdown and Stop methods multiple times
-// 2. Verify repeated calls do not cause errors
-// 3. Ensure runner is correctly in closed state
+// TestSingleThreadTaskRunner_IdempotentShutdown verifies multiple shutdown calls are safe
+// Given: A SingleThreadTaskRunner
+// When: Shutdown and Stop are called multiple times
+// Then: All calls complete without error, IsClosed returns true
 func TestSingleThreadTaskRunner_IdempotentShutdown(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 
-	// Multiple shutdowns should be safe
+	// Act - Multiple shutdown calls
 	runner.Shutdown()
 	runner.Shutdown()
 	runner.Stop()
 	runner.Stop()
 
+	// Assert
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+		t.Error("IsClosed() = false, want true")
 	}
 }
 
-// TestSingleThreadTaskRunner_ConcurrentPostTask tests concurrent task submission
-// Main test items:
-// 1. Submit tasks concurrently from multiple goroutines
-// 2. Verify all tasks are executed correctly
-// 3. Ensure no tasks are lost in concurrent scenarios
+// TestSingleThreadTaskRunner_ConcurrentPostTask verifies concurrent task submission
+// Given: 10 goroutines each posting 10 tasks
+// When: All tasks are posted concurrently
+// Then: All 100 tasks execute correctly
 func TestSingleThreadTaskRunner_ConcurrentPostTask(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	var counter atomic.Int32
 	done := make(chan struct{})
 
-	// Post tasks from multiple goroutines
+	// Act - Post 100 tasks from 10 goroutines
 	for i := 0; i < 10; i++ {
 		go func() {
 			for j := 0; j < 10; j++ {
@@ -478,17 +475,15 @@ func TestSingleThreadTaskRunner_ConcurrentPostTask(t *testing.T) {
 		}()
 	}
 
-	// Wait for all goroutines to finish posting
 	for i := 0; i < 10; i++ {
 		<-done
 	}
 
-	// Wait for all tasks to execute
 	time.Sleep(200 * time.Millisecond)
 
-	// All 100 tasks should have executed
+	// Assert - All tasks executed
 	if counter.Load() != 100 {
-		t.Errorf("Expected 100 tasks executed, got %d", counter.Load())
+		t.Errorf("counter = %d, want 100", counter.Load())
 	}
 }
 
@@ -496,50 +491,49 @@ func TestSingleThreadTaskRunner_ConcurrentPostTask(t *testing.T) {
 // Queue Policy Tests
 // =============================================================================
 
-// TestSingleThreadTaskRunner_PolicyConfiguration tests queue policy configuration
-// Main test items:
-// 1. Verify default queue policy is Drop
-// 2. Test setting different queue policies
-// 3. Configure rejection callback function
+// TestSingleThreadTaskRunner_PolicyConfiguration verifies queue policy configuration
+// Given: A SingleThreadTaskRunner
+// When: Queue policies are set and queried
+// Then: Policies are correctly configured
 func TestSingleThreadTaskRunner_PolicyConfiguration(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
-	// Test default
+	// Assert - Default is Drop
 	if runner.GetQueuePolicy() != QueuePolicyDrop {
-		t.Errorf("Expected default policy Drop, got %v", runner.GetQueuePolicy())
+		t.Errorf("GetQueuePolicy() = %v, want Drop", runner.GetQueuePolicy())
 	}
 
-	// Test setting different policies
+	// Act - Set different policies
 	policies := []QueuePolicy{QueuePolicyDrop, QueuePolicyReject, QueuePolicyWait}
 	for _, policy := range policies {
 		runner.SetQueuePolicy(policy)
 		if runner.GetQueuePolicy() != policy {
-			t.Errorf("Expected policy %v, got %v", policy, runner.GetQueuePolicy())
+			t.Errorf("GetQueuePolicy() = %v, want %v", runner.GetQueuePolicy(), policy)
 		}
 	}
 
-	// Test rejection callback configuration
+	// Act - Set rejection callback
 	callbackCalled := atomic.Bool{}
 	runner.SetRejectionCallback(func(task Task, traits TaskTraits) {
 		callbackCalled.Store(true)
 	})
 
-	// Verify we can set nil callback
 	runner.SetRejectionCallback(nil)
 
-	// Initially no rejections
+	// Assert - Initial rejected count
 	if runner.RejectedCount() != 0 {
-		t.Errorf("Expected 0 rejected count initially, got %d", runner.RejectedCount())
+		t.Errorf("RejectedCount() = %d, want 0", runner.RejectedCount())
 	}
 }
 
-// TestSingleThreadTaskRunner_QueuePolicyAfterClosed tests queue policy after close
-// Main test items:
-// 1. Set reject policy and close runner
-// 2. Set rejection callback after close
-// 3. Verify tasks submitted after close don't trigger rejection callback
+// TestSingleThreadTaskRunner_QueuePolicyAfterClosed verifies queue policy after close
+// Given: A closed SingleThreadTaskRunner with reject policy
+// When: Tasks are posted after close
+// Then: Rejection callback is not triggered (tasks are silently dropped)
 func TestSingleThreadTaskRunner_QueuePolicyAfterClosed(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 
 	runner.SetQueuePolicy(QueuePolicyReject)
@@ -550,85 +544,77 @@ func TestSingleThreadTaskRunner_QueuePolicyAfterClosed(t *testing.T) {
 		rejected.Add(1)
 	})
 
-	// Posting after close should not trigger rejection callback
+	// Act
 	runner.PostTask(func(ctx context.Context) {})
 
 	time.Sleep(50 * time.Millisecond)
 
+	// Assert - No rejection callback after close
 	if rejected.Load() != 0 {
-		t.Errorf("Tasks posted after close should not trigger rejection callback, got %d", rejected.Load())
+		t.Errorf("rejected = %d, want 0 (no callback after close)", rejected.Load())
 	}
 
 	runner.Stop()
 }
 
-// TestSingleThreadTaskRunner_QueuePolicyReject_Callback tests rejection policy callback
-// Main test items:
-// 1. Set reject policy and callback function
-// 2. Rapidly submit large number of tasks to fill queue
-// 3. Verify rejected tasks trigger callback
+// TestSingleThreadTaskRunner_QueuePolicyReject_Callback verifies reject policy callback
+// Given: A SingleThreadTaskRunner with reject policy
+// When: Tasks overflow the queue
+// Then: Rejection callback is invoked for rejected tasks
 func TestSingleThreadTaskRunner_QueuePolicyReject_Callback(t *testing.T) {
+	// Arrange
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
 	runner.SetQueuePolicy(QueuePolicyReject)
 
-	// Track rejected tasks
 	var rejectedCount atomic.Int32
-	var rejectedTraits atomic.Value // stores TaskTraits
+	var rejectedTraits atomic.Value
 
 	runner.SetRejectionCallback(func(task Task, traits TaskTraits) {
 		rejectedCount.Add(1)
 		rejectedTraits.Store(traits)
 	})
 
-	// Post tasks rapidly - with enough tasks, some should be rejected
+	// Act - Post many tasks to fill queue
 	customTraits := TaskTraits{Priority: TaskPriorityUserBlocking}
-
-	// Post a large number of tasks rapidly
-	// The queue can only hold 100, so posting 200 should trigger rejections
 	for i := 0; i < 200; i++ {
 		runner.PostTaskWithTraits(func(ctx context.Context) {}, customTraits)
 	}
 
-	// Give time for callback to be called
 	time.Sleep(100 * time.Millisecond)
 
-	// With Drop policy (default), tasks would be silently dropped
-	// With Reject policy, callback should have been called
+	// Assert
 	if runner.RejectedCount() == 0 {
-		t.Skip("Queue did not fill - skipping rejection test (timing dependent)")
+		t.Skip("Queue did not fill - timing dependent")
 	}
 
-	// At minimum, if rejections occurred, callback should have been called
 	if int64(rejectedCount.Load()) != runner.RejectedCount() {
-		t.Logf("Note: Callback count (%d) != RejectedCount (%d) - callback runs in goroutine",
-			rejectedCount.Load(), runner.RejectedCount())
+		t.Logf("Callback count (%d) != RejectedCount (%d)", rejectedCount.Load(), runner.RejectedCount())
 	}
 }
 
-// TestSingleThreadTaskRunner_QueuePolicy_DropVsReject tests difference between Drop and Reject policies
-// Main test items:
-// 1. Test Drop policy: tasks are silently dropped
-// 2. Test Reject policy: tasks are rejected and counted
-// 3. Verify different behaviors of the two policies
+// TestSingleThreadTaskRunner_QueuePolicy_DropVsReject verifies difference between Drop and Reject
+// Given: Two SingleThreadTaskRunners with Drop and Reject policies
+// When: Tasks overflow the queues
+// Then: Drop policy silently drops, Reject policy counts rejections
 func TestSingleThreadTaskRunner_QueuePolicy_DropVsReject(t *testing.T) {
-	// Test Drop policy (default)
+	// Arrange - Test Drop policy
 	runner1 := NewSingleThreadTaskRunner()
 	runner1.SetQueuePolicy(QueuePolicyDrop)
 
-	// Post a large number of tasks
+	// Act - Post many tasks
 	for i := 0; i < 200; i++ {
 		runner1.PostTask(func(ctx context.Context) {})
 	}
 
-	// No rejection count with Drop policy
+	// Assert - No rejections counted
 	if runner1.RejectedCount() != 0 {
-		t.Errorf("Drop policy should not increment rejected count, got %d", runner1.RejectedCount())
+		t.Errorf("RejectedCount() = %d (Drop), want 0", runner1.RejectedCount())
 	}
 	runner1.Stop()
 
-	// Test Reject policy
+	// Arrange - Test Reject policy
 	runner2 := NewSingleThreadTaskRunner()
 	runner2.SetQueuePolicy(QueuePolicyReject)
 
@@ -637,15 +623,14 @@ func TestSingleThreadTaskRunner_QueuePolicy_DropVsReject(t *testing.T) {
 		callbackCount.Add(1)
 	})
 
-	// Post a large number of tasks
+	// Act - Post many tasks
 	for i := 0; i < 200; i++ {
 		runner2.PostTask(func(ctx context.Context) {})
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	// With Reject policy, rejected count should be > 0 (if queue filled)
-	// This is timing dependent, so we just verify the mechanism works
+	// Assert - Rejections counted (if queue filled)
 	if runner2.RejectedCount() > 0 {
 		t.Logf("Reject policy rejected %d tasks", runner2.RejectedCount())
 	}

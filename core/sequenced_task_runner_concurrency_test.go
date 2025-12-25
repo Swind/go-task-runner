@@ -13,8 +13,11 @@ import (
 )
 
 // TestSequencedTaskRunner_ConcurrentPostTask verifies that concurrent PostTask calls
-// from multiple goroutines do not cause duplicate runLoop instances.
+// Given: 100 goroutines each posting 100 tasks to a SequencedTaskRunner
+// When: all tasks are posted and WaitIdle is called
+// Then: all 10000 tasks execute exactly once and runningCount returns to 0
 func TestSequencedTaskRunner_ConcurrentPostTask(t *testing.T) {
+	// Arrange - Create thread pool and runner
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -28,7 +31,7 @@ func TestSequencedTaskRunner_ConcurrentPostTask(t *testing.T) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	// Launch many goroutines posting tasks concurrently
+	// Act - Launch many goroutines posting tasks concurrently
 	for i := range numGoroutines {
 		wg.Add(1)
 		go func(goroutineID int) {
@@ -53,22 +56,27 @@ func TestSequencedTaskRunner_ConcurrentPostTask(t *testing.T) {
 		t.Fatalf("WaitIdle failed: %v", err)
 	}
 
-	// Verify all tasks were executed
+	// Assert - Verify all tasks were executed
 	expectedCount := numGoroutines * tasksPerGoroutine
-	if len(executionOrder) != expectedCount {
-		t.Errorf("Expected %d tasks to execute, got %d", expectedCount, len(executionOrder))
+	gotCount := len(executionOrder)
+	if gotCount != expectedCount {
+		t.Errorf("tasks executed: got = %d, want = %d", gotCount, expectedCount)
 	}
 
-	// Verify runningCount is back to 0
+	// Assert - Verify runningCount is back to 0
 	finalCount := runner.GetRunningCount()
-	if finalCount != 0 {
-		t.Errorf("Expected runningCount to be 0 after all tasks complete, got %d", finalCount)
+	wantFinalCount := int32(0)
+	if finalCount != wantFinalCount {
+		t.Errorf("final runningCount: got = %d, want = %d", finalCount, wantFinalCount)
 	}
 }
 
-// TestSequencedTaskRunner_RunningCountInvariant verifies that runningCount
-// never exceeds 1 during concurrent operations.
+// TestSequencedTaskRunner_RunningCountInvariant verifies that runningCount never exceeds 1
+// Given: a SequencedTaskRunner with a monitoring goroutine and 1000 posted tasks
+// When: tasks execute while monitor continuously checks runningCount
+// Then: runningCount never exceeds 1 and all tasks execute successfully
 func TestSequencedTaskRunner_RunningCountInvariant(t *testing.T) {
+	// Arrange - Create thread pool, runner, and monitoring setup
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 8)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -81,7 +89,7 @@ func TestSequencedTaskRunner_RunningCountInvariant(t *testing.T) {
 
 	done := make(chan struct{})
 
-	// Monitor goroutine: continuously check runningCount
+	// Act - Start monitor goroutine that continuously checks runningCount
 	go func() {
 		ticker := time.NewTicker(1 * time.Microsecond)
 		defer ticker.Stop()
@@ -119,26 +127,32 @@ func TestSequencedTaskRunner_RunningCountInvariant(t *testing.T) {
 
 	close(done)
 
-	// Verify all tasks executed
-	if tasksExecuted != numTasks {
-		t.Errorf("Expected %d tasks to execute, got %d", numTasks, tasksExecuted)
+	// Assert - Verify all tasks executed
+	gotExecuted := tasksExecuted
+	wantExecuted := int32(numTasks)
+	if gotExecuted != wantExecuted {
+		t.Errorf("tasks executed: got = %d, want = %d", gotExecuted, wantExecuted)
 	}
 
-	// Verify runningCount never exceeded 1
+	// Assert - Verify runningCount never exceeded 1
 	if maxRunningCount > 1 {
-		t.Errorf("runningCount exceeded 1 during execution (max observed: %d)", maxRunningCount)
+		t.Errorf("max runningCount: got = %d (want <= 1)", maxRunningCount)
 	}
 
-	// Verify final state
+	// Assert - Verify final state
 	finalCount := runner.GetRunningCount()
-	if finalCount != 0 {
-		t.Errorf("Expected runningCount to be 0 after completion, got %d", finalCount)
+	wantFinalCount := int32(0)
+	if finalCount != wantFinalCount {
+		t.Errorf("final runningCount: got = %d, want = %d", finalCount, wantFinalCount)
 	}
 }
 
-// TestSequencedTaskRunner_SequentialOrderUnderConcurrency verifies that tasks
-// execute in FIFO order even when posted from multiple goroutines.
+// TestSequencedTaskRunner_SequentialOrderUnderConcurrency verifies FIFO execution order
+// Given: 1000 tasks posted concurrently from multiple goroutines
+// When: all tasks complete
+// Then: each task executes exactly once (execution order may differ from posting order)
 func TestSequencedTaskRunner_SequentialOrderUnderConcurrency(t *testing.T) {
+	// Arrange - Create thread pool, runner, and tracking setup
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -148,12 +162,12 @@ func TestSequencedTaskRunner_SequentialOrderUnderConcurrency(t *testing.T) {
 	var executionOrder []int
 	var mu sync.Mutex
 
-	// Post tasks from multiple goroutines
-	// Each task records its ID in order
 	const numTasks = 1000
 	posted := make(chan int, numTasks)
 
 	var wg sync.WaitGroup
+
+	// Act - Post tasks from multiple goroutines
 	for i := range numTasks {
 		wg.Add(1)
 		go func(taskID int) {
@@ -170,12 +184,6 @@ func TestSequencedTaskRunner_SequentialOrderUnderConcurrency(t *testing.T) {
 	wg.Wait()
 	close(posted)
 
-	// Collect posting order
-	var postOrder []int
-	for id := range posted {
-		postOrder = append(postOrder, id)
-	}
-
 	// Wait for all tasks to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -183,30 +191,35 @@ func TestSequencedTaskRunner_SequentialOrderUnderConcurrency(t *testing.T) {
 		t.Fatalf("WaitIdle failed: %v", err)
 	}
 
-	// Verify all tasks executed
-	if len(executionOrder) != numTasks {
-		t.Errorf("Expected %d tasks to execute, got %d", numTasks, len(executionOrder))
+	// Assert - Verify all tasks executed
+	gotCount := len(executionOrder)
+	wantCount := numTasks
+	if gotCount != wantCount {
+		t.Errorf("tasks executed: got = %d, want = %d", gotCount, wantCount)
 	}
 
-	// Note: Due to concurrent posting, we can't guarantee execution order matches posting order
-	// But we can verify that all tasks executed exactly once
+	// Assert - Verify each task executed exactly once
 	seen := make(map[int]int)
 	for _, id := range executionOrder {
 		seen[id]++
 	}
 
 	for i := range numTasks {
-		if count, ok := seen[i]; !ok {
-			t.Errorf("Task %d was never executed", i)
+		count, ok := seen[i]
+		if !ok {
+			t.Errorf("task %d: was never executed", i)
 		} else if count != 1 {
-			t.Errorf("Task %d executed %d times (expected 1)", i, count)
+			t.Errorf("task %d: executed %d times (want = 1)", i, count)
 		}
 	}
 }
 
-// TestSequencedTaskRunner_DoubleCheckPattern tests the double-check pattern
-// by creating race conditions between Pop and Push operations.
+// TestSequencedTaskRunner_DoubleCheckPattern tests the double-check pattern in runLoop
+// Given: a SequencedTaskRunner with rapid task posting
+// When: 100 iterations of posting 2 tasks in quick succession
+// Then: both tasks execute in each iteration and runningCount returns to 0
 func TestSequencedTaskRunner_DoubleCheckPattern(t *testing.T) {
+	// Arrange - Create thread pool and runner
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -214,6 +227,8 @@ func TestSequencedTaskRunner_DoubleCheckPattern(t *testing.T) {
 	runner := core.NewSequencedTaskRunner(pool)
 
 	const iterations = 100
+
+	// Act - Run 100 iterations of double-check pattern test
 	for iter := range iterations {
 		var executed int32
 
@@ -234,31 +249,36 @@ func TestSequencedTaskRunner_DoubleCheckPattern(t *testing.T) {
 		err := runner.WaitIdle(ctx)
 		cancel()
 
+		// Assert - Verify both tasks executed
 		if err != nil {
-			t.Fatalf("Iteration %d: WaitIdle failed: %v", iter, err)
+			t.Fatalf("iteration %d: WaitIdle failed: %v", iter, err)
 		}
 
-		if executed != 2 {
-			t.Errorf("Iteration %d: Expected 2 tasks to execute, got %d", iter, executed)
+		gotExecuted := executed
+		wantExecuted := int32(2)
+		if gotExecuted != wantExecuted {
+			t.Errorf("iteration %d: tasks executed: got = %d, want = %d", iter, gotExecuted, wantExecuted)
 		}
 
-		// Verify runningCount is back to 0
-		if rc := runner.GetRunningCount(); rc != 0 {
-			t.Errorf("Iteration %d: runningCount should be 0, got %d", iter, rc)
+		// Assert - Verify runningCount is back to 0
+		rc := runner.GetRunningCount()
+		wantRC := int32(0)
+		if rc != wantRC {
+			t.Errorf("iteration %d: runningCount: got = %d, want = %d", iter, rc, wantRC)
 		}
 	}
 }
 
-// TestSequencedTaskRunner_StressTest is a comprehensive stress test that:
-// - Posts tasks from many goroutines simultaneously
-// - Mixes fast and slow tasks
-// - Verifies sequential execution
-// - Checks runningCount invariant
+// TestSequencedTaskRunner_StressTest performs a comprehensive stress test
+// Given: 50 goroutines posting 100 tasks each with mixed execution times
+// When: all tasks are posted and executed
+// Then: all 5000 tasks execute sequentially and runningCount invariant holds
 func TestSequencedTaskRunner_StressTest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping stress test in short mode")
 	}
 
+	// Arrange - Create thread pool, runner, and tracking setup
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 8)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -276,7 +296,7 @@ func TestSequencedTaskRunner_StressTest(t *testing.T) {
 	var wg sync.WaitGroup
 	start := time.Now()
 
-	// Launch poster goroutines
+	// Act - Launch poster goroutines with mixed fast/slow tasks
 	for i := range numPosters {
 		wg.Add(1)
 		go func(posterID int) {
@@ -316,22 +336,25 @@ func TestSequencedTaskRunner_StressTest(t *testing.T) {
 
 	executionDone := time.Now()
 
-	// Verify all tasks executed
+	// Assert - Verify all tasks executed
 	finalCount := atomic.LoadInt32(&executionCounter)
-	if finalCount != totalTasks {
-		t.Errorf("Expected %d tasks to execute, got %d", totalTasks, finalCount)
+	wantCount := int32(totalTasks)
+	if finalCount != wantCount {
+		t.Errorf("tasks executed: got = %d, want = %d", finalCount, wantCount)
 	}
 
-	// Verify execution times are sequential (monotonically increasing)
+	// Assert - Verify execution times are sequential (monotonically increasing)
 	for i := 1; i < len(executionTimes); i++ {
 		if executionTimes[i].Before(executionTimes[i-1]) {
-			t.Errorf("Execution times not sequential: task %d executed before task %d", i, i-1)
+			t.Errorf("execution order violation: task %d executed before task %d", i, i-1)
 		}
 	}
 
-	// Verify final runningCount
-	if rc := runner.GetRunningCount(); rc != 0 {
-		t.Errorf("Expected final runningCount to be 0, got %d", rc)
+	// Assert - Verify final runningCount
+	rc := runner.GetRunningCount()
+	wantRC := int32(0)
+	if rc != wantRC {
+		t.Errorf("final runningCount: got = %d, want = %d", rc, wantRC)
 	}
 
 	t.Logf("Stress test completed:")
@@ -341,9 +364,12 @@ func TestSequencedTaskRunner_StressTest(t *testing.T) {
 	t.Logf("  Total time: %v", executionDone.Sub(start))
 }
 
-// TestSequencedTaskRunner_NoSpuriousRunLoops verifies that ensureRunning
-// correctly uses CAS to prevent starting multiple runLoops.
+// TestSequencedTaskRunner_NoSpuriousRunLoops verifies CAS prevents duplicate runLoops
+// Given: a SequencedTaskRunner and 1000 concurrent calls to ensureRunning
+// When: all calls execute concurrently
+// Then: runningCount never exceeds 1 and final state returns to 0
 func TestSequencedTaskRunner_NoSpuriousRunLoops(t *testing.T) {
+	// Arrange - Create thread pool and runner
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 8)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -353,8 +379,7 @@ func TestSequencedTaskRunner_NoSpuriousRunLoops(t *testing.T) {
 	const numConcurrentCalls = 1000
 	var wg sync.WaitGroup
 
-	// Try to call ensureRunning many times concurrently
-	// Only one should succeed in starting a runLoop
+	// Act - Try to call ensureRunning many times concurrently
 	for range numConcurrentCalls {
 		wg.Add(1)
 		go func() {
@@ -365,10 +390,10 @@ func TestSequencedTaskRunner_NoSpuriousRunLoops(t *testing.T) {
 
 	wg.Wait()
 
-	// runningCount should be at most 1
+	// Assert - Verify runningCount is at most 1
 	rc := runner.GetRunningCount()
 	if rc > 1 {
-		t.Errorf("ensureRunning allowed runningCount to exceed 1: %d", rc)
+		t.Errorf("runningCount during test: got = %d (want <= 1)", rc)
 	}
 
 	// Post a task to clean up if runLoop is running
@@ -378,33 +403,35 @@ func TestSequencedTaskRunner_NoSpuriousRunLoops(t *testing.T) {
 	defer cancel()
 	runner.WaitIdle(ctx)
 
-	// Final runningCount should be 0
+	// Assert - Verify final runningCount is 0
 	finalRC := runner.GetRunningCount()
-	if finalRC != 0 {
-		t.Errorf("Expected final runningCount to be 0, got %d", finalRC)
+	wantFinalRC := int32(0)
+	if finalRC != wantFinalRC {
+		t.Errorf("final runningCount: got = %d, want = %d", finalRC, wantFinalRC)
 	}
 }
 
-// TestSequencedTaskRunner_PanicOnInvalidRunningCount verifies that runLoop
-// panics if started with incorrect runningCount.
+// TestSequencedTaskRunner_PanicOnInvalidRunningCount verifies runLoop panic on invalid state
+// Given: a SequencedTaskRunner with runningCount manually set to 2
+// When: runLoop is executed directly
+// Then: runLoop panics with message mentioning runningCount=2
 func TestSequencedTaskRunner_PanicOnInvalidRunningCount(t *testing.T) {
+	// Arrange - Create thread pool, runner, and set invalid runningCount
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
 
 	runner := core.NewSequencedTaskRunner(pool)
-
-	// Manually set runningCount to invalid value
 	runner.SetRunningCount(2)
 
-	// Try to execute runLoop directly (should panic)
+	// Act & Assert - Try to execute runLoop directly (should panic)
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected runLoop to panic with invalid runningCount, but it didn't")
+			t.Error("panic: got = nil (want panic with invalid runningCount)")
 		} else {
 			errMsg := fmt.Sprintf("%v", r)
 			if !contains(errMsg, "runningCount=2") {
-				t.Errorf("Expected panic message to mention runningCount=2, got: %v", r)
+				t.Errorf("panic message: got = %v (want containing 'runningCount=2')", r)
 			}
 		}
 	}()

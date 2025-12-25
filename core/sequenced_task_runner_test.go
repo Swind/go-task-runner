@@ -40,133 +40,115 @@ func (m *MockThreadPool) QueuedTaskCount() int      { return 0 }
 func (m *MockThreadPool) ActiveTaskCount() int      { return 0 }
 func (m *MockThreadPool) DelayedTaskCount() int     { return 0 }
 
-// TestSequencedTaskRunner_SequentialExecution tests sequential task execution
-// Main test items:
-// 1. Tasks execute in first-in-first-out (FIFO) order
-// 2. Only one task executes at a time, then reposts runLoop
-// 3. Verify execution order matches expectations
+// TestSequencedTaskRunner_SequentialExecution verifies FIFO task execution
+// Given: A SequencedTaskRunner with mock thread pool
+// When: Multiple tasks are posted
+// Then: Tasks execute in FIFO order, one at a time
 func TestSequencedTaskRunner_SequentialExecution(t *testing.T) {
+	// Arrange
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executionOrder []int
-
-	// Helper to create valid task
 	createTask := func(id int) core.Task {
 		return func(ctx context.Context) {
 			executionOrder = append(executionOrder, id)
 		}
 	}
 
-	// 1. Post Task 1
+	// Act - Post Task 1
 	runner.PostTask(createTask(1))
 
-	// Should execute immediately via PostInternal(runLoop)
+	// Assert - runLoop was posted
 	if len(mockPool.postedTasks) != 1 {
-		t.Fatalf("expected 1 posted task (runLoop), got %d", len(mockPool.postedTasks))
+		t.Fatalf("len(postedTasks) = %d, want 1 (runLoop)", len(mockPool.postedTasks))
 	}
 
-	// Simulate Worker executing the runLoop
+	// Act - Execute runLoop (simulates worker execution)
 	runLoopTask := mockPool.postedTasks[0].Task
-	mockPool.postedTasks = nil // Reset
+	mockPool.postedTasks = nil
 	runLoopTask(context.Background())
 
+	// Assert - Task 1 executed
 	if len(executionOrder) != 1 || executionOrder[0] != 1 {
-		t.Errorf("Task 1 should have executed")
+		t.Error("Task 1 did not execute")
 	}
 
-	// 2. Post Task 2 & 3
+	// Act - Post Tasks 2 & 3
 	runner.PostTask(createTask(2))
 	runner.PostTask(createTask(3))
 
-	// Should trigger runLoop again?
-	// If the previous runLoop finished and queue was empty, isRunning became false.
-	// But if we post 2, it sets isRunning=true and posts runLoop.
-
+	// Assert - runLoop reposted for Task 2
 	if len(mockPool.postedTasks) == 0 {
-		t.Fatal("expected runLoop to be posted for Task 2")
+		t.Fatal("runLoop not posted for Task 2")
 	}
 
-	// Run loop for Task 2
+	// Act - Execute runLoop for Task 2
 	runLoopTask = mockPool.postedTasks[0].Task
 	mockPool.postedTasks = nil
 	runLoopTask(context.Background())
 
-	// After Task 2, does it execute Task 3 immediately in same loop (old behavior) or repost (new behavior)?
-	// Old behavior (MaxTasksPerSlice=4): Task 3 executed in same loop.
-	// New behavior (MaxTasksPerSlice=1): Task 3 requires repost.
-
-	// Let's verify what happened.
-	// If Task 3 is NOT in executionOrder, it means we need to process next repost.
-
-	if len(executionOrder) == 3 {
-		// Old behavior: processed batch
-		t.Log("Executed in batch")
-	} else if len(executionOrder) == 2 {
-		// New behavior: executed one, posted next
-		if len(mockPool.postedTasks) != 1 {
-			t.Errorf("Expected repost for Task 3")
-		}
-		// Execute Task 3
+	// Act - Execute Task 3 if reposted
+	if len(executionOrder) == 2 && len(mockPool.postedTasks) == 1 {
 		mockPool.postedTasks[0].Task(context.Background())
 	}
 
+	// Assert - All tasks executed
 	if len(executionOrder) != 3 {
-		t.Errorf("All tasks should operate")
+		t.Errorf("execution order length = %d, want 3", len(executionOrder))
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_PreventsNewTasks tests that shutdown prevents new tasks
-// Main test items:
-// 1. Tasks submitted before shutdown execute normally
-// 2. Cannot submit new tasks after shutdown
-// 3. No new runLoop is sent after shutdown
+// TestSequencedTaskRunner_Shutdown_PreventsNewTasks verifies shutdown prevents new tasks
+// Given: A SequencedTaskRunner with one executed task
+// When: Shutdown is called and a new task is posted
+// Then: New task is rejected and does not execute
 func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
+	// Arrange
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executed atomic.Int32
-	// Task that increments counter
 	task1 := func(ctx context.Context) { executed.Add(1) }
 	runner.PostTask(task1)
 
-	// Simulate runLoop execution for the posted task
+	// Execute runLoop for task1
 	if len(mockPool.postedTasks) != 1 {
-		t.Fatalf("expected 1 posted runLoop task, got %d", len(mockPool.postedTasks))
+		t.Fatalf("len(postedTasks) = %d, want 1", len(mockPool.postedTasks))
 	}
 	runLoop := mockPool.postedTasks[0].Task
 	mockPool.postedTasks = nil
 	runLoop(context.Background())
 
-	// Verify task1 ran
+	// Assert - task1 executed
 	if executed.Load() != 1 {
-		t.Fatalf("task1 should have executed before shutdown")
+		t.Fatalf("executed = %d, want 1 (task1 before shutdown)", executed.Load())
 	}
 
-	// Shutdown the runner
+	// Act - Shutdown the runner
 	runner.Shutdown()
 
-	// Attempt to post another task after shutdown
+	// Act - Try to post task2 after shutdown
 	task2 := func(ctx context.Context) { executed.Add(1) }
 	runner.PostTask(task2)
 
-	// No new runLoop should be posted
+	// Assert - No new runLoop posted after shutdown
 	if len(mockPool.postedTasks) != 0 {
-		t.Fatalf("no runLoop should be posted after shutdown")
+		t.Errorf("postedTasks after shutdown = %d, want 0", len(mockPool.postedTasks))
 	}
 
-	// Ensure counter unchanged
+	// Assert - task2 did not execute
 	if executed.Load() != 1 {
-		t.Fatalf("task2 should not have executed after shutdown")
+		t.Errorf("executed = %d, want 1 (task2 should not run)", executed.Load())
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_ClearsPendingQueue tests that shutdown clears the pending queue
-// Main test items:
-// 1. Shutdown clears all pending tasks in the queue
-// 2. Running runLoop after shutdown does not process any tasks
-// 3. Verify task counter remains at zero
+// TestSequencedTaskRunner_Shutdown_ClearsPendingQueue verifies shutdown clears pending tasks
+// Given: A SequencedTaskRunner with 2 queued tasks
+// When: Shutdown is called before any execution
+// Then: Pending queue is cleared and no tasks execute
 func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
+	// Arrange
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
 
@@ -174,168 +156,158 @@ func TestSequencedTaskRunner_Shutdown_ClearsPendingQueue(t *testing.T) {
 	task1 := func(ctx context.Context) { executed.Add(1) }
 	task2 := func(ctx context.Context) { executed.Add(1) }
 
-	// Post two tasks
+	// Act - Post two tasks
 	runner.PostTask(task1)
 	runner.PostTask(task2)
 
-	// Shutdown before any runLoop execution
+	// Act - Shutdown before execution
 	runner.Shutdown()
 
-	// Run the posted runLoop (only one should be posted for first task)
+	// Act - Execute posted runLoop
 	if len(mockPool.postedTasks) != 1 {
-		t.Fatalf("expected 1 runLoop task posted, got %d", len(mockPool.postedTasks))
+		t.Fatalf("len(postedTasks) = %d, want 1", len(mockPool.postedTasks))
 	}
 	runLoop := mockPool.postedTasks[0].Task
 	mockPool.postedTasks = nil
 	runLoop(context.Background())
 
-	// Only first task should have executed; second cleared
+	// Assert - No tasks executed after shutdown
 	if executed.Load() != 0 {
-		t.Fatalf("no tasks should execute after shutdown, got %d", executed.Load())
+		t.Errorf("executed = %d, want 0 (queue cleared)", executed.Load())
 	}
 }
 
-// TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts tests that shutdown from task prevents further posts
-// Main test items:
-// 1. Call Shutdown from within a task
-// 2. Attempting to submit new task after shutdown does not execute
-// 3. Verify only the first task is executed
+// TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts verifies shutdown from task prevents further posts
+// Given: A task that calls Shutdown and posts another task
+// When: The task executes
+// Then: Second post is rejected and only first task executes
 func TestSequencedTaskRunner_Shutdown_FromTaskPreventsFurtherPosts(t *testing.T) {
+	// Arrange
 	mockPool := &MockThreadPool{}
 	runner := core.NewSequencedTaskRunner(mockPool)
 
 	var executed atomic.Int32
-	// Task that shuts down runner and then tries to post another task
 	task1 := func(ctx context.Context) {
 		executed.Add(1)
 		runner.Shutdown()
-		// Attempt to post a second task
 		runner.PostTask(func(ctx context.Context) { executed.Add(1) })
 	}
 
+	// Act
 	runner.PostTask(task1)
 
-	// Run the runLoop
+	// Execute runLoop
 	if len(mockPool.postedTasks) != 1 {
-		t.Fatalf("expected runLoop task posted, got %d", len(mockPool.postedTasks))
+		t.Fatalf("len(postedTasks) = %d, want 1", len(mockPool.postedTasks))
 	}
 	runLoop := mockPool.postedTasks[0].Task
 	mockPool.postedTasks = nil
 	runLoop(context.Background())
 
-	// No additional runLoop should be posted after shutdown
+	// Assert - No additional runLoop after shutdown from task
 	if len(mockPool.postedTasks) != 0 {
-		t.Fatalf("no additional runLoop should be posted after shutdown inside task")
+		t.Errorf("postedTasks after shutdown = %d, want 0", len(mockPool.postedTasks))
 	}
 
+	// Assert - Only first task executed
 	if executed.Load() != 1 {
-		t.Fatalf("only the first task should have executed, got %d", executed.Load())
+		t.Errorf("executed = %d, want 1", executed.Load())
 	}
 }
 
-// TestSequencedTaskRunner_Integration_WithRealThreadPool tests integration with real thread pool
-// Main test items:
-// 1. Create SequencedTaskRunner using real GoroutineThreadPool
-// 2. Verify multiple tasks execute correctly
-// 3. Cannot execute new tasks after shutdown
+// TestSequencedTaskRunner_Integration_WithRealThreadPool verifies integration with real thread pool
+// Given: A SequencedTaskRunner with real GoroutineThreadPool
+// When: Tasks are posted and then runner is shut down
+// Then: Tasks execute correctly and new tasks are rejected after shutdown
 func TestSequencedTaskRunner_Integration_WithRealThreadPool(t *testing.T) {
-	// Create and start a real GoroutineThreadPool with 2 workers
+	// Arrange
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
 	pool.Start(context.Background())
 	defer pool.Stop()
 
-	// Create a SequencedTaskRunner using the real pool
 	runner := core.NewSequencedTaskRunner(pool)
 
 	var executed atomic.Int32
 	task := func(ctx context.Context) { executed.Add(1) }
 
-	// Post several tasks
+	// Act - Post several tasks
 	runner.PostTask(task)
 	runner.PostTask(task)
 	runner.PostTask(task)
-
-	// Allow some time for tasks to be processed
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert - All tasks executed
 	if executed.Load() != 3 {
-		t.Fatalf("expected 3 tasks to have executed, got %d", executed.Load())
+		t.Errorf("executed = %d, want 3", executed.Load())
 	}
 
-	// Shutdown the runner
+	// Act - Shutdown
 	runner.Shutdown()
 
-	// Attempt to post another task after shutdown
+	// Act - Try to post after shutdown
 	runner.PostTask(task)
-
-	// Wait to ensure no new tasks are processed
 	time.Sleep(50 * time.Millisecond)
 
+	// Assert - No new tasks executed
 	if executed.Load() != 3 {
-		t.Fatalf("no tasks should run after shutdown, expected 3, got %d", executed.Load())
+		t.Errorf("executed = %d, want 3 (no new tasks after shutdown)", executed.Load())
 	}
 
+	// Assert - Runner reports closed
 	if !runner.IsClosed() {
-		t.Fatalf("runner should report closed after shutdown")
+		t.Error("IsClosed() = false, want true")
 	}
 }
 
-// TestSequencedTaskRunner_Integration_WithGlobalThreadPool tests integration with global thread pool
-// Main test items:
-// 1. Create TaskRunner using global thread pool
-// 2. Verify tasks execute correctly
-// 3. Verify status and behavior after shutdown
+// TestSequencedTaskRunner_Integration_WithGlobalThreadPool verifies integration with global thread pool
+// Given: A SequencedTaskRunner using global thread pool
+// When: Tasks are posted and runner is shut down
+// Then: Tasks execute correctly and runner reports closed
 func TestSequencedTaskRunner_Integration_WithGlobalThreadPool(t *testing.T) {
-	// Initialize global thread pool with 2 workers
+	// Arrange
 	taskrunner.InitGlobalThreadPool(2)
 	defer taskrunner.ShutdownGlobalThreadPool()
 
-	// Create a SequencedTaskRunner using the global pool
 	runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 
 	var executed atomic.Int32
-	// Simple task increments counter
 	task := func(ctx context.Context) { executed.Add(1) }
 
-	// Post a few tasks
+	// Act - Post tasks
 	runner.PostTask(task)
 	runner.PostTask(task)
 	runner.PostTask(task)
-
-	// Allow some time for tasks to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify that tasks have run (up to 3)
+	// Assert - All tasks executed
 	if executed.Load() != 3 {
-		t.Fatalf("expected 3 tasks to have executed, got %d", executed.Load())
+		t.Errorf("executed = %d, want 3", executed.Load())
 	}
 
-	// Shutdown the runner
+	// Act - Shutdown
 	runner.Shutdown()
 
-	// Attempt to post another task after shutdown
+	// Act - Try to post after shutdown
 	runner.PostTask(task)
-
-	// Wait a bit to ensure no new tasks are processed
 	time.Sleep(50 * time.Millisecond)
 
-	// Counter should remain at 3
+	// Assert - No new tasks executed
 	if executed.Load() != 3 {
-		t.Fatalf("no tasks should run after shutdown, expected 3, got %d", executed.Load())
+		t.Errorf("executed = %d, want 3 (no new tasks after shutdown)", executed.Load())
 	}
 
+	// Assert - Runner reports closed
 	if !runner.IsClosed() {
-		t.Fatalf("runner should report closed after shutdown")
+		t.Error("IsClosed() = false, want true")
 	}
 }
 
-// TestSequencedTaskRunner_WaitIdle tests waiting for idle state
-// Main test items:
-// 1. Submit multiple tasks with delays
-// 2. Call WaitIdle to wait for all tasks to complete
-// 3. Verify all tasks have finished executing
+// TestSequencedTaskRunner_WaitIdle verifies waiting for idle state
+// Given: A SequencedTaskRunner with 10 delayed tasks
+// When: WaitIdle is called
+// Then: Returns after all tasks complete
 func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
-	// 1. Setup real thread pool
+	// Arrange
 	pool := taskrunner.NewGoroutineThreadPool("wait-idle-pool", 2)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -345,7 +317,7 @@ func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 	var counter atomic.Int32
 	taskCount := 10
 
-	// 2. Post tasks
+	// Act - Post tasks
 	for i := 0; i < taskCount; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -353,28 +325,28 @@ func TestSequencedTaskRunner_WaitIdle(t *testing.T) {
 		})
 	}
 
-	// 3. WaitIdle
+	// Act - Wait for idle
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err := runner.WaitIdle(ctx)
+
+	// Assert
 	if err != nil {
-		t.Fatalf("WaitIdle failed: %v", err)
+		t.Fatalf("WaitIdle() error = %v, want nil", err)
 	}
 
-	// 4. Verify all tasks executed
 	if count := counter.Load(); int(count) != taskCount {
-		t.Errorf("Expected %d tasks to complete, got %d", taskCount, count)
+		t.Errorf("executed tasks = %d, want %d", count, taskCount)
 	}
 }
 
-// TestSequencedTaskRunner_FlushAsync tests async flush functionality
-// Main test items:
-// 1. Submit multiple tasks
-// 2. Use FlushAsync to register callback function
-// 3. Verify callback is executed after all tasks complete
+// TestSequencedTaskRunner_FlushAsync verifies async flush callback functionality
+// Given: A SequencedTaskRunner with tasks
+// When: FlushAsync is called with callback
+// Then: Callback executes after all tasks complete
 func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
-	// 1. Setup real thread pool
+	// Arrange
 	pool := taskrunner.NewGoroutineThreadPool("flush-async-pool", 2)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -385,7 +357,7 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 	var flushCalled atomic.Bool
 	taskCount := 10
 
-	// 2. Post tasks
+	// Act - Post tasks
 	for i := 0; i < taskCount; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -393,40 +365,32 @@ func TestSequencedTaskRunner_FlushAsync(t *testing.T) {
 		})
 	}
 
-	// 3. FlushAsync
-	runner.FlushAsync(func() {
-		flushCalled.Store(true)
-		if count := counter.Load(); int(count) != taskCount {
-			t.Errorf("Flush called but not all tasks completed: %d/%d", count, taskCount)
-		}
-	})
-
-	// 4. Wait for flush - FlushAsync is non-blocking, so we sleep a bit or use a channel to wait for callback
-	// Ideally we pass a channel to the flush callback to signal done.
+	// Act - FlushAsync with callback
 	done := make(chan struct{})
 	runner.FlushAsync(func() {
+		flushCalled.Store(true)
 		close(done)
 	})
 
+	// Assert - Wait for callback
 	select {
 	case <-done:
-		// success
+		// Success
 	case <-time.After(2 * time.Second):
 		t.Fatal("Flush callback timed out")
 	}
 
 	if !flushCalled.Load() {
-		t.Error("First Flush callback was not called")
+		t.Error("flush callback not called")
 	}
 }
 
-// TestSequencedTaskRunner_WaitShutdown tests waiting for shutdown signal
-// Main test items:
-// 1. Wait for shutdown signal in another goroutine
-// 2. Submit and execute tasks
-// 3. Shutdown runner and verify signal is received
+// TestSequencedTaskRunner_WaitShutdown verifies shutdown signal waiting
+// Given: A goroutine waiting for shutdown signal
+// When: Runner is shut down
+// Then: WaitShutdown returns and signal is received
 func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
-	// 1. Setup real thread pool
+	// Arrange
 	pool := taskrunner.NewGoroutineThreadPool("wait-shutdown-pool", 2)
 	pool.Start(context.Background())
 	defer pool.Stop()
@@ -436,71 +400,65 @@ func TestSequencedTaskRunner_WaitShutdown(t *testing.T) {
 	var shutdownReceived atomic.Bool
 	var executed atomic.Int32
 
-	// 2. Goroutine waiting for shutdown
+	// Act - Start goroutine waiting for shutdown
 	go func() {
 		err := runner.WaitShutdown(context.Background())
 		if err != nil {
-			t.Errorf("WaitShutdown failed: %v", err)
+			t.Errorf("WaitShutdown() error = %v", err)
 		}
 		shutdownReceived.Store(true)
 	}()
 
-	// 3. Post some work
+	// Act - Post task
 	runner.PostTask(func(ctx context.Context) {
 		time.Sleep(50 * time.Millisecond)
 		executed.Add(1)
 	})
 
-	// 4. Shutdown after a delay
 	time.Sleep(100 * time.Millisecond)
+
+	// Act - Shutdown
 	runner.Shutdown()
 
-	// 5. Verify shutdown signal received
-	// Give it a moment to propagate
+	// Wait for signal propagation
 	time.Sleep(100 * time.Millisecond)
 
+	// Assert
 	if !shutdownReceived.Load() {
-		t.Error("WaitShutdown did not receive shutdown signal")
+		t.Error("shutdown signal not received")
 	}
 
 	if !runner.IsClosed() {
-		t.Error("Runner should be closed")
+		t.Error("IsClosed() = false, want true")
 	}
 
 	if executed.Load() != 1 {
-		t.Errorf("Task should have executed, executed count: %d", executed.Load())
+		t.Errorf("executed = %d, want 1", executed.Load())
 	}
 }
 
-// TestSequencedTaskRunner_GarbageCollection tests garbage collection mechanism
-// Main test items:
-// 1. Create SequencedTaskRunner and set finalizer
-// 2. Shutdown and drop reference
-// 3. Verify object can be correctly garbage collected
+// TestSequencedTaskRunner_GarbageCollection verifies runner can be garbage collected
+// Given: A SequencedTaskRunner with finalizer set
+// When: Runner goes out of scope and GC is triggered
+// Then: Finalizer is called
 func TestSequencedTaskRunner_GarbageCollection(t *testing.T) {
-	// 1. Setup
-	// Create a channel to signal finalizer execution
+	// Arrange
 	finalizerCalled := make(chan struct{})
 
-	// Create a scope to ensure runner reference is dropped
+	// Create scope so runner goes out of scope
 	func() {
-		// Use a real pool or mock pool (interface satisfaction is key)
 		pool := &MockThreadPool{}
 		runner := core.NewSequencedTaskRunner(pool)
 
-		// Set finalizer
 		runtime.SetFinalizer(runner, func(r *core.SequencedTaskRunner) {
 			close(finalizerCalled)
 		})
 
-		// Shutdown the runner (optional, but good practice to release resources)
 		runner.Shutdown()
-
-		// runner goes out of scope here
+		// runner goes out of scope
 	}()
 
-	// 2. Trigger GC
-	// We might need multiple GC cycles to ensure collection
+	// Act - Trigger GC multiple times
 	for i := 0; i < 5; i++ {
 		runtime.GC()
 		select {
@@ -511,62 +469,40 @@ func TestSequencedTaskRunner_GarbageCollection(t *testing.T) {
 		}
 	}
 
-	t.Fatal("SequencedTaskRunner was not garbage collected (finalizer not called)")
+	t.Fatal("SequencedTaskRunner not garbage collected (finalizer not called)")
 }
 
-// TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool tests garbage collection with real thread pool
-// Main test items:
-// 1. Use real GoroutineThreadPool
-// 2. Ensure tasks finish and close runner
-// 3. Verify runner can be garbage collected
+// TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool verifies GC with real pool
+// Given: A SequencedTaskRunner with real thread pool
+// When: Runner is shut down and goes out of scope
+// Then: Runner can be garbage collected
 func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) {
-	// 1. Setup
+	// Arrange
 	finalizerCalled := make(chan struct{})
 
-	// Create a scope to ensure runner reference is dropped
 	func() {
-		// Use a real GoroutineThreadPool
 		pool := taskrunner.NewGoroutineThreadPool("gc-test-pool", 2)
 		pool.Start(context.Background())
-		// Ensure pool is stopped to clean up its own resources, though for this test
-		// we mainly care about the runner being collected.
-		// Note: stopping the pool might be important if the pool holds references.
-		// However, SequencedTaskRunner holds reference TO the pool, not vice versa (usually).
-		// But tasks in the pool hold reference to the runner (in the closure).
-		// So we must ensure no tasks are pending that reference the runner.
 		defer pool.Stop()
 
 		runner := core.NewSequencedTaskRunner(pool)
 
-		// Post a task to ensure it's working and tied to the pool
+		// Post task to verify it's working
 		done := make(chan struct{})
 		runner.PostTask(func(ctx context.Context) {
 			close(done)
 		})
 		<-done
 
-		// Set finalizer
 		runtime.SetFinalizer(runner, func(r *core.SequencedTaskRunner) {
 			close(finalizerCalled)
 		})
 
-		// Shutdown the runner
-		// This is CRITICAL. It clears the queue and sets isRunning=false.
-		// If we don't shutdown, and if there were pending tasks (there aren't here),
-		// or if the runner was somehow registered in the pool (it isn't generally, mostly tasks),
-		// it might stay alive.
-		// More importantly, the user code is expected to Shutdown() before losing reference if they want clean cleanup,
-		// though GC should technically work if no goroutines reference it.
-		// But SequencedTaskRunner has a 'runLoop' executed by the pool.
-		// If runLoop is active, it references 'r'.
-		// runLoop terminates when queue is empty.
-		// So if queue is empty, runLoop should exit, and pool should drop reference to runLoop closure.
 		runner.Shutdown()
-
-		// runner goes out of scope here
+		// runner goes out of scope
 	}()
 
-	// 2. Trigger GC
+	// Act - Trigger GC
 	for i := 0; i < 10; i++ {
 		runtime.GC()
 		select {
@@ -577,25 +513,26 @@ func TestSequencedTaskRunner_GarbageCollection_WithRealThreadPool(t *testing.T) 
 		}
 	}
 
-	t.Fatal("SequencedTaskRunner with Real ThreadPool was not garbage collected")
+	t.Fatal("SequencedTaskRunner with Real ThreadPool not garbage collected")
 }
 
-// TestSequencedTaskRunner_GetThreadPool tests getting the thread pool
-// Main test items:
-// 1. Create SequencedTaskRunner and specify thread pool
-// 2. Call GetThreadPool to get the thread pool
-// 3. Verify returned pool matches the one specified at creation
+// TestSequencedTaskRunner_GetThreadPool verifies GetThreadPool returns the pool
+// Given: A SequencedTaskRunner created with specific pool
+// When: GetThreadPool is called
+// Then: Returns the same pool that was passed to constructor
 func TestSequencedTaskRunner_GetThreadPool(t *testing.T) {
+	// Arrange
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	defer pool.Stop()
 
 	runner := core.NewSequencedTaskRunner(pool)
 
-	// GetThreadPool should return the pool that was passed to NewSequencedTaskRunner
+	// Act
 	retrievedPool := runner.GetThreadPool()
 
+	// Assert
 	if retrievedPool != pool {
-		t.Error("GetThreadPool should return the same pool that was passed to NewSequencedTaskRunner")
+		t.Error("GetThreadPool() returned different pool")
 	}
 }
