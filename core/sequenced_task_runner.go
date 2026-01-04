@@ -146,10 +146,19 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				// Task panicked, but we continue processing
-				// (repeating tasks and PostTaskAndReply have their own panic handling)
-				log.Printf("[SequencedTaskRunner] Task panic recovered: %v\nStack trace:\n%s",
-					rec, debug.Stack())
+				// Get panic handler from thread pool if available
+				if tp, ok := r.threadPool.(interface{ GetScheduler() *TaskScheduler }); ok {
+					if handler := tp.GetScheduler().GetPanicHandler(); handler != nil {
+						handler.HandlePanic(runCtx, r.Name(), -1, rec, debug.Stack())
+					}
+					if metrics := tp.GetScheduler().GetMetrics(); metrics != nil {
+						metrics.RecordTaskPanic(r.Name(), rec)
+					}
+				} else {
+					// Fallback to basic logging
+					log.Printf("[SequencedTaskRunner] Task panic recovered: %v\nStack trace:\n%s",
+						rec, debug.Stack())
+				}
 			}
 		}()
 		item.Task(runCtx)

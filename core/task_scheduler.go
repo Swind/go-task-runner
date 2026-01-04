@@ -17,11 +17,20 @@ type TaskScheduler struct {
 	metricActive  int32 // Executing in Worker
 	metricDelayed int32 // Waiting in DelayManager
 
+	// Handlers and Metrics
+	panicHandler          PanicHandler
+	metrics               Metrics
+	rejectedTaskHandler   RejectedTaskHandler
+
 	// Lifecycle
 	shuttingDown int32 // atomic flag
 }
 
 func NewPriorityTaskScheduler(workerCount int) *TaskScheduler {
+	return NewPriorityTaskSchedulerWithConfig(workerCount, DefaultTaskSchedulerConfig())
+}
+
+func NewPriorityTaskSchedulerWithConfig(workerCount int, config *TaskSchedulerConfig) *TaskScheduler {
 	s := &TaskScheduler{
 		signal:      make(chan struct{}, workerCount*2),
 		workerCount: workerCount,
@@ -30,10 +39,33 @@ func NewPriorityTaskScheduler(workerCount int) *TaskScheduler {
 	// Use single PriorityTaskQueue which handles priority ordering internally
 	s.queue = NewPriorityTaskQueue()
 	s.delayManager = NewDelayManager()
+
+	// Apply config
+	if config != nil {
+		s.panicHandler = config.PanicHandler
+		s.metrics = config.Metrics
+		s.rejectedTaskHandler = config.RejectedTaskHandler
+	}
+
+	// Use defaults if not provided
+	if s.panicHandler == nil {
+		s.panicHandler = &DefaultPanicHandler{}
+	}
+	if s.metrics == nil {
+		s.metrics = &NilMetrics{}
+	}
+	if s.rejectedTaskHandler == nil {
+		s.rejectedTaskHandler = &DefaultRejectedTaskHandler{}
+	}
+
 	return s
 }
 
 func NewFIFOTaskScheduler(workerCount int) *TaskScheduler {
+	return NewFIFOTaskSchedulerWithConfig(workerCount, DefaultTaskSchedulerConfig())
+}
+
+func NewFIFOTaskSchedulerWithConfig(workerCount int, config *TaskSchedulerConfig) *TaskScheduler {
 	s := &TaskScheduler{
 		signal:      make(chan struct{}, workerCount*2),
 		workerCount: workerCount,
@@ -42,6 +74,25 @@ func NewFIFOTaskScheduler(workerCount int) *TaskScheduler {
 	// Use single FIFOTaskQueue which handles priority ordering internally
 	s.queue = NewFIFOTaskQueue()
 	s.delayManager = NewDelayManager()
+
+	// Apply config
+	if config != nil {
+		s.panicHandler = config.PanicHandler
+		s.metrics = config.Metrics
+		s.rejectedTaskHandler = config.RejectedTaskHandler
+	}
+
+	// Use defaults if not provided
+	if s.panicHandler == nil {
+		s.panicHandler = &DefaultPanicHandler{}
+	}
+	if s.metrics == nil {
+		s.metrics = &NilMetrics{}
+	}
+	if s.rejectedTaskHandler == nil {
+		s.rejectedTaskHandler = &DefaultRejectedTaskHandler{}
+	}
+
 	return s
 }
 
@@ -49,7 +100,8 @@ func NewFIFOTaskScheduler(workerCount int) *TaskScheduler {
 func (s *TaskScheduler) PostInternal(task Task, traits TaskTraits) {
 	// If shutting down, reject new tasks (or decide based on policy)
 	if atomic.LoadInt32(&s.shuttingDown) == 1 {
-		fmt.Println("Scheduler is shutting down, task rejected")
+		s.rejectedTaskHandler.HandleRejectedTask("TaskScheduler", "shutting down")
+		s.metrics.RecordTaskRejected("TaskScheduler", "shutting down")
 		return
 	}
 
@@ -59,6 +111,8 @@ func (s *TaskScheduler) PostInternal(task Task, traits TaskTraits) {
 	select {
 	case s.signal <- struct{}{}:
 	default:
+		// Signal channel full, but task is already queued
+		// This is not an error, just a optimization hint
 	}
 }
 
@@ -143,4 +197,14 @@ func (s *TaskScheduler) OnTaskStart() {
 
 func (s *TaskScheduler) OnTaskEnd() {
 	atomic.AddInt32(&s.metricActive, -1)
+}
+
+// GetPanicHandler returns the panic handler for this scheduler
+func (s *TaskScheduler) GetPanicHandler() PanicHandler {
+	return s.panicHandler
+}
+
+// GetMetrics returns the metrics collector for this scheduler
+func (s *TaskScheduler) GetMetrics() Metrics {
+	return s.metrics
 }

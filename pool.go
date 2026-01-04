@@ -2,7 +2,7 @@ package taskrunner
 
 import (
 	"context"
-	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -31,11 +31,29 @@ func NewGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
 	}
 }
 
+// NewGoroutineThreadPoolWithConfig creates a new GoroutineThreadPool with custom config
+func NewGoroutineThreadPoolWithConfig(id string, workers int, config *core.TaskSchedulerConfig) *GoroutineThreadPool {
+	return &GoroutineThreadPool{
+		id:        id,
+		workers:   workers,
+		scheduler: core.NewFIFOTaskSchedulerWithConfig(workers, config),
+	}
+}
+
 func NewPriorityGoroutineThreadPool(id string, workers int) *GoroutineThreadPool {
 	return &GoroutineThreadPool{
 		id:        id,
 		workers:   workers,
 		scheduler: core.NewPriorityTaskScheduler(workers),
+	}
+}
+
+// NewPriorityGoroutineThreadPoolWithConfig creates a new priority-based GoroutineThreadPool with custom config
+func NewPriorityGoroutineThreadPoolWithConfig(id string, workers int, config *core.TaskSchedulerConfig) *GoroutineThreadPool {
+	return &GoroutineThreadPool{
+		id:        id,
+		workers:   workers,
+		scheduler: core.NewPriorityTaskSchedulerWithConfig(workers, config),
 	}
 }
 
@@ -137,6 +155,10 @@ func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 	defer tg.wg.Done()
 	stopCh := ctx.Done()
 
+	panicHandler := tg.scheduler.GetPanicHandler()
+	metrics := tg.scheduler.GetMetrics()
+	poolName := tg.id
+
 	for {
 		// Pull tasks from WorkSource
 		task, ok := tg.scheduler.GetWork(stopCh)
@@ -145,16 +167,33 @@ func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 			return
 		}
 
+		// Record start time for metrics
+		startTime := time.Now()
+
 		// Update Active Metrics via interface
 		tg.scheduler.OnTaskStart()
 
 		// Execute task and capture panic
 		func() {
 			defer func() {
+				duration := time.Since(startTime)
+
 				tg.scheduler.OnTaskEnd()
+
 				if r := recover(); r != nil {
-					// TODO: Add better error handling, e.g. callback
-					fmt.Printf("[Worker %d] Panic: %v\n", id, r)
+					// Use panic handler if available
+					if panicHandler != nil {
+						panicHandler.HandlePanic(ctx, poolName, id, r, debug.Stack())
+					}
+					// Record panic in metrics
+					if metrics != nil {
+						metrics.RecordTaskPanic(poolName, r)
+					}
+				} else {
+					// Record successful task completion
+					if metrics != nil {
+						metrics.RecordTaskDuration(poolName, core.TaskPriorityUserVisible, duration)
+					}
 				}
 			}()
 			task(ctx)
@@ -182,6 +221,11 @@ func (tg *GoroutineThreadPool) ActiveTaskCount() int {
 
 func (tg *GoroutineThreadPool) DelayedTaskCount() int {
 	return tg.scheduler.DelayedTaskCount()
+}
+
+// GetScheduler returns the underlying TaskScheduler for advanced configuration
+func (tg *GoroutineThreadPool) GetScheduler() *core.TaskScheduler {
+	return tg.scheduler
 }
 
 func (tg *GoroutineThreadPool) PostInternal(task core.Task, traits core.TaskTraits) {
