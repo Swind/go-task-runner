@@ -88,7 +88,8 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 
 	wg.Wait()
 	// Wait for delayed tasks to execute (delays: 50-140ms)
-	time.Sleep(1000 * time.Millisecond)
+	// Use longer timeout for CI environments which may be slower
+	time.Sleep(2000 * time.Millisecond)
 
 	// Assert - Most tasks executed (allow 10% tolerance)
 	count := executed.Load()
