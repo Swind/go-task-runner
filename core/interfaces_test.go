@@ -79,9 +79,9 @@ func TestDefaultPanicHandler(t *testing.T) {
 	handler.HandlePanic(ctx, "test-runner", 42, "test panic", []byte("stack trace"))
 
 	// Restore stdout
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
-	io.Copy(io.Discard, r) // Discard captured output
+	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	// Then: No panic should occur (handler should not crash)
 	// This is just a sanity test to ensure the handler works
@@ -345,9 +345,9 @@ func TestDefaultRejectedTaskHandler(t *testing.T) {
 	handler.HandleRejectedTask("test-runner", "shutdown")
 
 	// Restore stdout
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
-	io.Copy(io.Discard, r) // Discard captured output
+	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	// Then: No panic should occur (handler should not crash)
 	// This is just a sanity test to ensure the handler works

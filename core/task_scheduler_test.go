@@ -186,9 +186,9 @@ func TestTaskScheduler_Shutdown(t *testing.T) {
 	s.PostInternal(noop, DefaultTaskTraits())
 
 	// Restore stdout
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
-	io.Copy(io.Discard, r) // Discard captured output
+	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	gotQueued = s.QueuedTaskCount()
 	wantQueued = 1
@@ -306,9 +306,9 @@ func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
 	err := s.ShutdownGraceful(1 * time.Second)
 
 	// Restore stdout
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
-	io.Copy(io.Discard, r) // Discard captured output
+	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	// Assert - Verify shutdown succeeded
 	if err != nil {
@@ -324,9 +324,9 @@ func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
 	s.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
 
 	// Restore stdout
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
-	io.Copy(io.Discard, r) // Discard captured output
+	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	gotQueued := s.QueuedTaskCount()
 	wantQueued := 0

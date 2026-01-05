@@ -194,9 +194,9 @@ func TestDelayManager_MultipleDelays(t *testing.T) {
 	dm := core.NewDelayManager()
 	defer func() {
 		// Restore stdout before Stop() to capture shutdown output
-		w.Close()
+		_ = w.Close()
 		os.Stdout = old
-		io.Copy(io.Discard, r) // Discard captured output
+		_, _ = io.Copy(io.Discard, r) // Discard captured output
 		dm.Stop()
 	}()
 
