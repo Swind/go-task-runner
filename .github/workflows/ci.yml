@@ -80,9 +80,10 @@ jobs:
       # Run tests
       # --junitfile: Generate XML report
       # -- -coverprofile: Pass arguments to go test
+      # -- -tags=ci: Add 'ci' build tag to exclude scalable stress tests
       - name: Run tests with gotestsum
         run: |
-          gotestsum --junitfile unit-tests.xml -- -coverprofile=coverage.out -v ./...
+          gotestsum --junitfile unit-tests.xml -- -coverprofile=coverage.out -tags=ci -v ./...
 
       # Integrate test results into GitHub Checks UI
       - name: Publish Test Report
