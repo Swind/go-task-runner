@@ -18,9 +18,9 @@ type TaskScheduler struct {
 	metricDelayed int32 // Waiting in DelayManager
 
 	// Handlers and Metrics
-	panicHandler          PanicHandler
-	metrics               Metrics
-	rejectedTaskHandler   RejectedTaskHandler
+	panicHandler        PanicHandler
+	metrics             Metrics
+	rejectedTaskHandler RejectedTaskHandler
 
 	// Lifecycle
 	shuttingDown int32 // atomic flag

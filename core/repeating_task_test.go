@@ -280,11 +280,11 @@ func (tp *testThreadPool) PostDelayedInternal(task Task, delay time.Duration, tr
 	tp.scheduler.PostDelayedInternal(task, delay, traits, target)
 }
 
-func (tp *testThreadPool) Start(ctx context.Context)  {}
-func (tp *testThreadPool) Stop()                      {}
-func (tp *testThreadPool) ID() string                 { return "test-pool" }
-func (tp *testThreadPool) IsRunning() bool            { return true }
-func (tp *testThreadPool) WorkerCount() int           { return 2 }
-func (tp *testThreadPool) QueuedTaskCount() int       { return tp.scheduler.QueuedTaskCount() }
-func (tp *testThreadPool) ActiveTaskCount() int       { return tp.scheduler.ActiveTaskCount() }
-func (tp *testThreadPool) DelayedTaskCount() int      { return tp.scheduler.DelayedTaskCount() }
+func (tp *testThreadPool) Start(ctx context.Context) {}
+func (tp *testThreadPool) Stop()                     {}
+func (tp *testThreadPool) ID() string                { return "test-pool" }
+func (tp *testThreadPool) IsRunning() bool           { return true }
+func (tp *testThreadPool) WorkerCount() int          { return 2 }
+func (tp *testThreadPool) QueuedTaskCount() int      { return tp.scheduler.QueuedTaskCount() }
+func (tp *testThreadPool) ActiveTaskCount() int      { return tp.scheduler.ActiveTaskCount() }
+func (tp *testThreadPool) DelayedTaskCount() int     { return tp.scheduler.DelayedTaskCount() }

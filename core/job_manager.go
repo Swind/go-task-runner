@@ -455,7 +455,7 @@ func (m *JobManager) GetJob(ctx context.Context, id string) (*JobEntity, error) 
 // GetActiveJobCount returns the number of active jobs
 func (m *JobManager) GetActiveJobCount() int {
 	count := 0
-	m.activeJobs.Range(func(key, value interface{}) bool {
+	m.activeJobs.Range(func(key, value any) bool {
 		count++
 		return true
 	})
@@ -465,7 +465,7 @@ func (m *JobManager) GetActiveJobCount() int {
 // GetActiveJobs returns a snapshot of active jobs
 func (m *JobManager) GetActiveJobs() []*JobEntity {
 	var jobs []*JobEntity
-	m.activeJobs.Range(func(key, value interface{}) bool {
+	m.activeJobs.Range(func(key, value any) bool {
 		info := value.(*activeJobInfo)
 		jobs = append(jobs, info.jobEntity)
 		return true
@@ -556,7 +556,7 @@ func (m *JobManager) Shutdown(ctx context.Context) error {
 	// 1. Cancel all active jobs (via controlRunner - fast)
 	doneChan := make(chan struct{})
 	m.controlRunner.PostTask(func(_ context.Context) {
-		m.activeJobs.Range(func(key, value interface{}) bool {
+		m.activeJobs.Range(func(key, value any) bool {
 			info := value.(*activeJobInfo)
 			info.cancel()
 			return true

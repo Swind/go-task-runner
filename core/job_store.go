@@ -158,7 +158,7 @@ func (s *MemoryJobStore) ListJobs(ctx context.Context, filter JobFilter) ([]*Job
 	count := 0
 	skipped := 0
 
-	s.data.Range(func(key, value interface{}) bool {
+	s.data.Range(func(key, value any) bool {
 		job := value.(*JobEntity)
 
 		// Apply filters
@@ -218,7 +218,7 @@ func (s *MemoryJobStore) Clear() {
 // Count returns the total number of jobs in the store
 func (s *MemoryJobStore) Count() int {
 	count := 0
-	s.data.Range(func(key, value interface{}) bool {
+	s.data.Range(func(key, value any) bool {
 		count++
 		return true
 	})

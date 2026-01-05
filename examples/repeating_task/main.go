@@ -41,7 +41,7 @@ func main() {
 			elapsed := time.Since(startTime).Round(100 * time.Millisecond)
 			fmt.Printf("  [Task 2] Execution #%d at %v\n", counter2, elapsed)
 		},
-		1*time.Second,   // initialDelay
+		1*time.Second,        // initialDelay
 		300*time.Millisecond, // interval
 		taskrunner.DefaultTaskTraits(),
 	)

@@ -65,7 +65,7 @@ func (r *SequencedTaskRunner) Metadata() map[string]any {
 }
 
 // SetMetadata sets a metadata key-value pair
-func (r *SequencedTaskRunner) SetMetadata(key string, value interface{}) {
+func (r *SequencedTaskRunner) SetMetadata(key string, value any) {
 	r.metadataMu.Lock()
 	defer r.metadataMu.Unlock()
 	r.metadata[key] = value

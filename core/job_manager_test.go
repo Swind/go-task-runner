@@ -355,7 +355,7 @@ func TestJSONSerializer_NilHandling(t *testing.T) {
 	}
 
 	// Assert - Deserialize to nil target fails
-	var target interface{}
+	var target any
 	if err := serializer.Deserialize(data, nil); err == nil {
 		t.Error("Deserialize(nil target) = nil, want error")
 	}

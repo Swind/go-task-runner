@@ -15,13 +15,13 @@ import (
 type TestPanicHandler struct {
 	mu            sync.Mutex
 	calls         []PanicCall
-	onPanicCalled func(ctx context.Context, runnerName string, workerID int, panicInfo interface{}, stackTrace []byte)
+	onPanicCalled func(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte)
 }
 
 type PanicCall struct {
 	RunnerName string
 	WorkerID   int
-	PanicInfo  interface{}
+	PanicInfo  any
 }
 
 func NewTestPanicHandler() *TestPanicHandler {
@@ -30,7 +30,7 @@ func NewTestPanicHandler() *TestPanicHandler {
 	}
 }
 
-func (h *TestPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo interface{}, stackTrace []byte) {
+func (h *TestPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -81,15 +81,15 @@ func TestDefaultPanicHandler(t *testing.T) {
 
 // TestMetrics is a mock metrics collector for testing
 type TestMetrics struct {
-	mu                  sync.Mutex
-	taskDurations       []TaskDurationMetric
-	taskPanics          []TaskPanicMetric
-	queueDepths         []QueueDepthMetric
-	taskRejections      []TaskRejectionMetric
-	onTaskDuration      func(runnerName string, priority TaskPriority, duration time.Duration)
-	onTaskPanic         func(runnerName string, panicInfo interface{})
-	onQueueDepth        func(runnerName string, depth int)
-	onTaskRejected      func(runnerName string, reason string)
+	mu             sync.Mutex
+	taskDurations  []TaskDurationMetric
+	taskPanics     []TaskPanicMetric
+	queueDepths    []QueueDepthMetric
+	taskRejections []TaskRejectionMetric
+	onTaskDuration func(runnerName string, priority TaskPriority, duration time.Duration)
+	onTaskPanic    func(runnerName string, panicInfo any)
+	onQueueDepth   func(runnerName string, depth int)
+	onTaskRejected func(runnerName string, reason string)
 }
 
 type TaskDurationMetric struct {
@@ -100,7 +100,7 @@ type TaskDurationMetric struct {
 
 type TaskPanicMetric struct {
 	RunnerName string
-	PanicInfo  interface{}
+	PanicInfo  any
 }
 
 type QueueDepthMetric struct {
@@ -137,7 +137,7 @@ func (m *TestMetrics) RecordTaskDuration(runnerName string, priority TaskPriorit
 	}
 }
 
-func (m *TestMetrics) RecordTaskPanic(runnerName string, panicInfo interface{}) {
+func (m *TestMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -272,8 +272,8 @@ func TestTestMetrics(t *testing.T) {
 
 // TestRejectedTaskHandler is a mock rejected task handler for testing
 type TestRejectedTaskHandler struct {
-	mu                  sync.Mutex
-	rejections          []TaskRejection
+	mu                   sync.Mutex
+	rejections           []TaskRejection
 	onRejectedTaskCalled func(runnerName string, reason string)
 }
 
@@ -393,9 +393,9 @@ func TestTaskSchedulerConfig_CustomHandlers(t *testing.T) {
 	rejectedHandler := NewTestRejectedTaskHandler()
 
 	config := &TaskSchedulerConfig{
-		PanicHandler:         panicHandler,
-		Metrics:              metrics,
-		RejectedTaskHandler:  rejectedHandler,
+		PanicHandler:        panicHandler,
+		Metrics:             metrics,
+		RejectedTaskHandler: rejectedHandler,
 	}
 
 	// Then: Handlers should be set correctly
@@ -440,9 +440,9 @@ func TestTaskScheduler_WithCustomHandlers(t *testing.T) {
 	rejectedHandler := NewTestRejectedTaskHandler()
 
 	config := &TaskSchedulerConfig{
-		PanicHandler:         panicHandler,
-		Metrics:              metrics,
-		RejectedTaskHandler:  rejectedHandler,
+		PanicHandler:        panicHandler,
+		Metrics:             metrics,
+		RejectedTaskHandler: rejectedHandler,
 	}
 
 	scheduler := NewFIFOTaskSchedulerWithConfig(2, config)
@@ -469,8 +469,8 @@ func TestTaskScheduler_RejectedTask(t *testing.T) {
 	rejectedHandler := NewTestRejectedTaskHandler()
 
 	config := &TaskSchedulerConfig{
-		Metrics:              metrics,
-		RejectedTaskHandler:  rejectedHandler,
+		Metrics:             metrics,
+		RejectedTaskHandler: rejectedHandler,
 	}
 
 	scheduler := NewFIFOTaskSchedulerWithConfig(2, config)
@@ -551,9 +551,9 @@ func ExampleTaskSchedulerConfig() {
 
 	// Create config
 	config := &TaskSchedulerConfig{
-		PanicHandler:         panicHandler,
-		Metrics:              metrics,
-		RejectedTaskHandler:  rejectedHandler,
+		PanicHandler:        panicHandler,
+		Metrics:             metrics,
+		RejectedTaskHandler: rejectedHandler,
 	}
 
 	// Create scheduler with config

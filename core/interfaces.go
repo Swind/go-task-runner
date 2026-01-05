@@ -23,14 +23,14 @@ type PanicHandler interface {
 	// - workerID: The ID of the worker (for thread pool workers, -1 for single-threaded runners)
 	// - panicInfo: The panic value recovered from the task
 	// - stackTrace: The stack trace at the time of panic
-	HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo interface{}, stackTrace []byte)
+	HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte)
 }
 
 // DefaultPanicHandler provides a basic panic handler that logs to stdout.
 type DefaultPanicHandler struct{}
 
 // HandlePanic prints panic information to stdout.
-func (h *DefaultPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo interface{}, stackTrace []byte) {
+func (h *DefaultPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
 	if workerID >= 0 {
 		fmt.Printf("[Worker %d @ %s] Panic: %v\nStack trace:\n%s",
 			workerID, runnerName, panicInfo, stackTrace)
@@ -63,7 +63,7 @@ type Metrics interface {
 	// Parameters:
 	// - runnerName: The name of the task runner
 	// - panicInfo: The panic value recovered from the task
-	RecordTaskPanic(runnerName string, panicInfo interface{})
+	RecordTaskPanic(runnerName string, panicInfo any)
 
 	// RecordQueueDepth records the current queue depth.
 	// This can be called periodically to track queue growth/shrinkage.
@@ -90,7 +90,7 @@ func (m *NilMetrics) RecordTaskDuration(runnerName string, priority TaskPriority
 }
 
 // RecordTaskPanic is a no-op.
-func (m *NilMetrics) RecordTaskPanic(runnerName string, panicInfo interface{}) {
+func (m *NilMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
 }
 
 // RecordQueueDepth is a no-op.
@@ -149,8 +149,8 @@ type TaskSchedulerConfig struct {
 // DefaultTaskSchedulerConfig returns a config with default handlers.
 func DefaultTaskSchedulerConfig() *TaskSchedulerConfig {
 	return &TaskSchedulerConfig{
-		PanicHandler:          &DefaultPanicHandler{},
-		Metrics:              &NilMetrics{},
-		RejectedTaskHandler:  &DefaultRejectedTaskHandler{},
+		PanicHandler:        &DefaultPanicHandler{},
+		Metrics:             &NilMetrics{},
+		RejectedTaskHandler: &DefaultRejectedTaskHandler{},
 	}
 }

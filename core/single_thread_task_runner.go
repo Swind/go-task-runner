@@ -41,10 +41,10 @@ type SingleThreadTaskRunner struct {
 	workQueue chan Task
 
 	// Queue policy for handling full queue
-	queuePolicyMu    sync.RWMutex
-	queuePolicy      QueuePolicy
+	queuePolicyMu     sync.RWMutex
+	queuePolicy       QueuePolicy
 	rejectionCallback RejectionCallback
-	rejectedCount    atomic.Int64
+	rejectedCount     atomic.Int64
 
 	// Lifecycle control
 	ctx    context.Context
@@ -59,7 +59,7 @@ type SingleThreadTaskRunner struct {
 
 	// Metadata
 	name     string
-	metadata map[string]interface{}
+	metadata map[string]any
 	mu       sync.Mutex
 }
 
@@ -73,7 +73,7 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 		cancel:       cancel,
 		stopped:      make(chan struct{}),
 		shutdownChan: make(chan struct{}),
-		metadata:     make(map[string]interface{}),
+		metadata:     make(map[string]any),
 		queuePolicy:  QueuePolicyDrop, // Default: drop tasks when queue is full
 	}
 
@@ -98,12 +98,12 @@ func (r *SingleThreadTaskRunner) SetName(name string) {
 }
 
 // Metadata returns the metadata associated with the task runner
-func (r *SingleThreadTaskRunner) Metadata() map[string]interface{} {
+func (r *SingleThreadTaskRunner) Metadata() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// Return a copy to avoid race conditions
-	result := make(map[string]interface{}, len(r.metadata))
+	result := make(map[string]any, len(r.metadata))
 	for k, v := range r.metadata {
 		result[k] = v
 	}
@@ -111,7 +111,7 @@ func (r *SingleThreadTaskRunner) Metadata() map[string]interface{} {
 }
 
 // SetMetadata sets a metadata key-value pair
-func (r *SingleThreadTaskRunner) SetMetadata(key string, value interface{}) {
+func (r *SingleThreadTaskRunner) SetMetadata(key string, value any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.metadata[key] = value

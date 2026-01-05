@@ -25,11 +25,11 @@ type Logger interface {
 // Field represents a key-value pair for structured logging
 type Field struct {
 	Key   string
-	Value interface{}
+	Value any
 }
 
 // F creates a new Field with the given key and value
-func F(key string, value interface{}) Field {
+func F(key string, value any) Field {
 	return Field{Key: key, Value: value}
 }
 

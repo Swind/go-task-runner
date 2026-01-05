@@ -186,14 +186,14 @@ func (h priorityHeap) Swap(i, j int) {
 	h[j].index = j
 }
 
-func (h *priorityHeap) Push(x interface{}) {
+func (h *priorityHeap) Push(x any) {
 	n := len(*h)
 	item := x.(*priorityItem)
 	item.index = n
 	*h = append(*h, item)
 }
 
-func (h *priorityHeap) Pop() interface{} {
+func (h *priorityHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]

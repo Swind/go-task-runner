@@ -6,14 +6,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/Swind/go-task-runner/core"
 	taskrunner "github.com/Swind/go-task-runner"
+	"github.com/Swind/go-task-runner/core"
 )
 
 // CustomPanicHandler demonstrates a custom panic handler that logs to a file
 type CustomPanicHandler struct{}
 
-func (h *CustomPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo interface{}, stackTrace []byte) {
+func (h *CustomPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
 	if workerID >= 0 {
 		log.Printf("[CUSTOM HANDLER] Worker %d @ %s panicked: %v\nStack: %s\n",
 			workerID, runnerName, panicInfo, string(stackTrace))
@@ -38,7 +38,7 @@ func (m *CustomMetrics) RecordTaskDuration(runnerName string, priority core.Task
 	}
 }
 
-func (m *CustomMetrics) RecordTaskPanic(runnerName string, panicInfo interface{}) {
+func (m *CustomMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
 	m.panicCount++
 	log.Printf("[METRICS] Panic recorded in %s: %v (total panics: %d)\n",
 		runnerName, panicInfo, m.panicCount)
@@ -95,7 +95,7 @@ func defaultConfig() {
 	runner.SetName("default-runner")
 
 	// Post some tasks
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		i := i
 		runner.PostTask(func(_ context.Context) {
 			fmt.Printf("Task %d executing\n", i)
@@ -189,7 +189,7 @@ func monitorQueueDepth() {
 	runner.SetName(metrics.runnerName)
 
 	// Post many tasks to create queue depth
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		i := i
 		runner.PostTask(func(_ context.Context) {
 			time.Sleep(10 * time.Millisecond)
@@ -202,7 +202,7 @@ func monitorQueueDepth() {
 	go func() {
 		ticker := time.NewTicker(20 * time.Millisecond)
 		defer ticker.Stop()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			<-ticker.C
 			metrics.RecordQueueDepth(metrics.runnerName, pool.QueuedTaskCount())
 		}
