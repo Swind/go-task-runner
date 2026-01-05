@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -64,12 +66,22 @@ func (h *TestPanicHandler) CallCount() int {
 }
 
 func TestDefaultPanicHandler(t *testing.T) {
+	// Capture stdout to prevent test output from being flagged as failure
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	// Given: A DefaultPanicHandler
 	handler := &DefaultPanicHandler{}
 
 	// When: HandlePanic is called
 	ctx := context.Background()
 	handler.HandlePanic(ctx, "test-runner", 42, "test panic", []byte("stack trace"))
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = old
+	io.Copy(io.Discard, r) // Discard captured output
 
 	// Then: No panic should occur (handler should not crash)
 	// This is just a sanity test to ensure the handler works
@@ -321,11 +333,21 @@ func (h *TestRejectedTaskHandler) Count() int {
 }
 
 func TestDefaultRejectedTaskHandler(t *testing.T) {
+	// Capture stdout to prevent test output from being flagged as failure
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	// Given: A DefaultRejectedTaskHandler
 	handler := &DefaultRejectedTaskHandler{}
 
 	// When: HandleRejectedTask is called
 	handler.HandleRejectedTask("test-runner", "shutdown")
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = old
+	io.Copy(io.Discard, r) // Discard captured output
 
 	// Then: No panic should occur (handler should not crash)
 	// This is just a sanity test to ensure the handler works

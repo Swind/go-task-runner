@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 	"time"
 )
@@ -161,6 +163,11 @@ func TestTaskScheduler_Metrics(t *testing.T) {
 // When: Shutdown is called
 // Then: the queue is cleared and new tasks are rejected
 func TestTaskScheduler_Shutdown(t *testing.T) {
+	// Capture stdout to prevent test output from being flagged as failure
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	// Arrange - Create scheduler and post a task
 	s := NewPriorityTaskScheduler(1)
 	noop := func(ctx context.Context) {}
@@ -177,6 +184,12 @@ func TestTaskScheduler_Shutdown(t *testing.T) {
 
 	// Assert - Verify new tasks are rejected
 	s.PostInternal(noop, DefaultTaskTraits())
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = old
+	io.Copy(io.Discard, r) // Discard captured output
+
 	gotQueued = s.QueuedTaskCount()
 	wantQueued = 1
 	if gotQueued != wantQueued {
@@ -281,19 +294,40 @@ func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }
 // When: ShutdownGraceful is called with 1 second timeout
 // Then: shutdown completes immediately and new tasks are rejected
 func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
+	// Capture stdout to prevent test output from being flagged as failure
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	// Arrange - Create scheduler with empty queue
 	s := NewPriorityTaskScheduler(2)
 
 	// Act - Call ShutdownGraceful (should complete immediately)
 	err := s.ShutdownGraceful(1 * time.Second)
 
+	// Restore stdout
+	w.Close()
+	os.Stdout = old
+	io.Copy(io.Discard, r) // Discard captured output
+
 	// Assert - Verify shutdown succeeded
 	if err != nil {
 		t.Fatalf("ShutdownGraceful failed: %v", err)
 	}
 
+	// Capture stdout again for the second part
+	old = os.Stdout
+	r, w, _ = os.Pipe()
+	os.Stdout = w
+
 	// Assert - Verify new tasks are rejected
 	s.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = old
+	io.Copy(io.Discard, r) // Discard captured output
+
 	gotQueued := s.QueuedTaskCount()
 	wantQueued := 0
 	if gotQueued != wantQueued {

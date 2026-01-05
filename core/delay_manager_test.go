@@ -2,6 +2,8 @@ package core_test
 
 import (
 	"context"
+	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -183,9 +185,20 @@ func TestDelayManager_EmptyQueue(t *testing.T) {
 // When: Tasks are added concurrently
 // Then: Tasks execute in order of shortest to longest delay
 func TestDelayManager_MultipleDelays(t *testing.T) {
+	// Capture stdout to prevent test output from being flagged as failure
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	// Arrange
 	dm := core.NewDelayManager()
-	defer dm.Stop()
+	defer func() {
+		// Restore stdout before Stop() to capture shutdown output
+		w.Close()
+		os.Stdout = old
+		io.Copy(io.Discard, r) // Discard captured output
+		dm.Stop()
+	}()
 
 	pool := taskrunner.NewGoroutineThreadPool("test", 4)
 	pool.Start(context.Background())
