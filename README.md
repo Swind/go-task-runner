@@ -1,5 +1,8 @@
 # Go Task Runner
 
+![Coverage](https://img.shields.io/badge/coverage-??%25-brightgreen?logo=go&link=https://github.com/Swind/go-task-runner)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Swind/go-task-runner)](https://goreportcard.com/report/github.com/Swind/go-task-runner)
+
 ### ⚠️ **Disclaimer: Experimental / Educational Use Only**
 
 This library is an **experimental implementation** for educational and testing purposes. It is **NOT** intended for production environments.
