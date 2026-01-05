@@ -1,7 +1,11 @@
 # Go Task Runner
 
+[![CI](https://github.com/Swind/go-task-runner/workflows/CI/badge.svg)](https://github.com/Swind/go-task-runner/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/badge/coverage-??%25-brightgreen?logo=go&link=https://github.com/Swind/go-task-runner)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Swind/go-task-runner)](https://goreportcard.com/report/github.com/Swind/go-task-runner)
+![Go Version](https://img.shields.io/badge/Go-1.24%2B-%2300ADD8?logo=go)
+[![License](https://img.shields.io/github/license/Swind/go-task-runner)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Swind/go-task-runner)](https://github.com/Swind/go-task-runner/releases/latest)
 
 ### ⚠️ **Disclaimer: Experimental / Educational Use Only**
 
