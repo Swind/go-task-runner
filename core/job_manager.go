@@ -429,12 +429,10 @@ func (m *JobManager) updateStatusIO(id string, status JobStatus, msg string) {
 	m.ioRunner.PostTask(func(_ context.Context) {
 		ctx := context.Background()
 		// Use retry logic for status updates
-		if err := m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
+		_ = m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
 			return m.store.UpdateStatus(ctx, id, status, msg)
-		}); err != nil {
-			// Error already logged and handled by retryIOOperation
-			// No additional action needed here
-		}
+		})
+		// Error already logged and handled by retryIOOperation
 	})
 }
 

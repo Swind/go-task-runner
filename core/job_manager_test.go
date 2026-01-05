@@ -67,7 +67,7 @@ func TestMemoryJobStore_UpdateStatus(t *testing.T) {
 		Type:   "email",
 		Status: core.JobStatusPending,
 	}
-	store.SaveJob(ctx, job)
+	_ = store.SaveJob(ctx, job)
 
 	// Act - Update status
 	if err := store.UpdateStatus(ctx, "job1", core.JobStatusRunning, ""); err != nil {
@@ -100,7 +100,7 @@ func TestMemoryJobStore_ListJobs(t *testing.T) {
 			Type:   "email",
 			Status: status,
 		}
-		store.SaveJob(ctx, job)
+		_ = store.SaveJob(ctx, job)
 	}
 
 	// Act - List all jobs
@@ -153,7 +153,7 @@ func TestMemoryJobStore_GetRecoverableJobs(t *testing.T) {
 			Type:   "email",
 			Status: status,
 		}
-		store.SaveJob(ctx, job)
+		_ = store.SaveJob(ctx, job)
 	}
 
 	// Act
@@ -184,7 +184,7 @@ func TestMemoryJobStore_DeleteJob(t *testing.T) {
 	ctx := context.Background()
 
 	job := &core.JobEntity{ID: "job1", Type: "email", Status: core.JobStatusPending}
-	store.SaveJob(ctx, job)
+	_ = store.SaveJob(ctx, job)
 
 	// Act - Delete
 	if err := store.DeleteJob(ctx, "job1"); err != nil {
@@ -212,7 +212,7 @@ func TestMemoryJobStore_Clear(t *testing.T) {
 			Type:   "email",
 			Status: core.JobStatusPending,
 		}
-		store.SaveJob(ctx, job)
+		_ = store.SaveJob(ctx, job)
 	}
 
 	if count := store.Count(); count != 5 {
@@ -253,7 +253,7 @@ func TestMemoryJobStore_Count(t *testing.T) {
 			Type:   "email",
 			Status: core.JobStatusPending,
 		}
-		store.SaveJob(ctx, job)
+		_ = store.SaveJob(ctx, job)
 
 		if count := store.Count(); count != i {
 			t.Errorf("Count() = %d after adding %d jobs, want %d", count, i, i)
@@ -261,8 +261,8 @@ func TestMemoryJobStore_Count(t *testing.T) {
 	}
 
 	// Act - Delete some jobs
-	store.DeleteJob(ctx, "job1")
-	store.DeleteJob(ctx, "job2")
+	_ = store.DeleteJob(ctx, "job1")
+	_ = store.DeleteJob(ctx, "job2")
 
 	// Assert
 	if count := store.Count(); count != 8 {
@@ -385,7 +385,7 @@ func setupJobManager(t *testing.T) (*core.JobManager, func()) {
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		manager.Shutdown(ctx)
+		_ = manager.Shutdown(ctx)
 		pool.Stop()
 	}
 
@@ -443,7 +443,7 @@ func TestJobManager_SubmitAndExecute(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act
 	args := EmailArgs{To: "user@example.com"}
@@ -491,7 +491,7 @@ func TestJobManager_SubmitDelayedJob(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit delayed job
 	delay := 200 * time.Millisecond
@@ -534,11 +534,11 @@ func TestJobManager_CancelJob(t *testing.T) {
 		return ctx.Err()
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
-	manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	_ = manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
 
 	// Wait for execution to start
 	select {
@@ -590,11 +590,11 @@ func TestJobManager_JobFailure(t *testing.T) {
 		return fmt.Errorf("simulated failure")
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
-	manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	_ = manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
 
 	// Wait for execution
 	select {
@@ -639,7 +639,7 @@ func TestJobManager_DuplicateSubmission(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit first job
 	args := EmailArgs{To: "user@example.com"}
@@ -684,12 +684,12 @@ func TestJobManager_GetActiveJobs(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit 3 jobs
 	for i := 0; i < 3; i++ {
 		args := EmailArgs{To: "user@example.com"}
-		manager.SubmitJob(context.Background(), fmt.Sprintf("job%d", i), "email", args, core.DefaultTaskTraits())
+		_ = manager.SubmitJob(context.Background(), fmt.Sprintf("job%d", i), "email", args, core.DefaultTaskTraits())
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -726,7 +726,7 @@ func TestJobManager_Recovery(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Note: This test requires access to internal store
 	t.Skip("Skipping recovery test - requires internal store access")
@@ -748,11 +748,11 @@ func TestJobManager_Shutdown(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
-	manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
+	_ = manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -813,14 +813,14 @@ func TestJobManager_ConcurrentSubmissions(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit 20 jobs concurrently
 	const jobCount = 20
 	for i := 0; i < jobCount; i++ {
 		go func(id int) {
 			args := EmailArgs{To: "user@example.com"}
-			manager.SubmitJob(context.Background(), fmt.Sprintf("job%d", id), "email", args, core.DefaultTaskTraits())
+			_ = manager.SubmitJob(context.Background(), fmt.Sprintf("job%d", id), "email", args, core.DefaultTaskTraits())
 		}(i)
 	}
 
@@ -911,7 +911,7 @@ func TestJobManager_RetrySuccess(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act - Submit job
@@ -986,7 +986,7 @@ func TestJobManager_RetryExhausted(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
@@ -1076,7 +1076,7 @@ func TestJobManager_NoRetry(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
@@ -1212,7 +1212,7 @@ func TestJobManager_ContextPropagation_ParentCancelsJob(t *testing.T) {
 		return ctx.Err()
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 
@@ -1277,7 +1277,7 @@ func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
 		}
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	parentCtx, parentCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer parentCancel()
@@ -1337,7 +1337,7 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	const concurrentSubmissions = 10
 	args := EmailArgs{To: "user@example.com"}
@@ -1395,7 +1395,7 @@ func TestJobManager_DuplicatePrevention_Sequential(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Act - Submit first job
 	args := EmailArgs{To: "user@example.com"}
@@ -1442,7 +1442,7 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 		Priority: 1,
 	}
 	ctx := context.Background()
-	store.SaveJob(ctx, existingJob)
+	_ = store.SaveJob(ctx, existingJob)
 
 	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
 
@@ -1456,12 +1456,12 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act - Try to submit duplicate
 	args := EmailArgs{To: "user@example.com"}
-	err := manager.SubmitJob(ctx, "job1", "email", args, core.DefaultTaskTraits())
+	_ = manager.SubmitJob(ctx, "job1", "email", args, core.DefaultTaskTraits())
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -1551,9 +1551,9 @@ func TestJobManager_ListJobs_FilterByStatus(t *testing.T) {
 	job2 := &core.JobEntity{ID: "job2", Type: "test", Status: core.JobStatusCompleted}
 	job3 := &core.JobEntity{ID: "job3", Type: "test", Status: core.JobStatusPending}
 
-	store.SaveJob(ctx, job1)
-	store.SaveJob(ctx, job2)
-	store.SaveJob(ctx, job3)
+	_ = store.SaveJob(ctx, job1)
+	_ = store.SaveJob(ctx, job2)
+	_ = store.SaveJob(ctx, job3)
 
 	// Act - List pending jobs
 	jobs, err := manager.ListJobs(ctx, core.JobFilter{Status: core.JobStatusPending})
@@ -1598,9 +1598,9 @@ func TestJobManager_ListJobs_FilterByType(t *testing.T) {
 	job2 := &core.JobEntity{ID: "job2", Type: "sms", Status: core.JobStatusPending}
 	job3 := &core.JobEntity{ID: "job3", Type: "email", Status: core.JobStatusPending}
 
-	store.SaveJob(ctx, job1)
-	store.SaveJob(ctx, job2)
-	store.SaveJob(ctx, job3)
+	_ = store.SaveJob(ctx, job1)
+	_ = store.SaveJob(ctx, job2)
+	_ = store.SaveJob(ctx, job3)
 
 	// Act - List email jobs
 	jobs, err := manager.ListJobs(ctx, core.JobFilter{Type: "email"})
@@ -1648,7 +1648,7 @@ func TestJobManager_ListJobs_WithLimitAndOffset(t *testing.T) {
 			Type:   "test",
 			Status: core.JobStatusPending,
 		}
-		store.SaveJob(ctx, job)
+		_ = store.SaveJob(ctx, job)
 	}
 
 	// Act - Test limit
@@ -1707,7 +1707,7 @@ func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 		return nil
 	}
 
-	core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, "email", handler)
 
 	// Create PENDING job in store (simulating previous run)
 	ctx := context.Background()
@@ -1718,7 +1718,7 @@ func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 		Status:   core.JobStatusPending,
 		Priority: 1,
 	}
-	store.SaveJob(ctx, existingJob)
+	_ = store.SaveJob(ctx, existingJob)
 
 	// Act - Start manager (should trigger recovery)
 	if err := manager.Start(ctx); err != nil {
@@ -1744,7 +1744,7 @@ func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 	// Cleanup
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	manager.Shutdown(shutdownCtx)
+	_ = manager.Shutdown(shutdownCtx)
 }
 
 // TestJobManager_Start_ConvertsRunningToFailed verifies orphaned RUNNING job handling
@@ -1775,7 +1775,7 @@ func TestJobManager_Start_ConvertsRunningToFailed(t *testing.T) {
 		Status:   core.JobStatusRunning,
 		Priority: 1,
 	}
-	store.SaveJob(ctx, runningJob)
+	_ = store.SaveJob(ctx, runningJob)
 
 	// Act - Start manager
 	if err := manager.Start(ctx); err != nil {
@@ -1799,5 +1799,5 @@ func TestJobManager_Start_ConvertsRunningToFailed(t *testing.T) {
 	// Cleanup
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	manager.Shutdown(shutdownCtx)
+	_ = manager.Shutdown(shutdownCtx)
 }

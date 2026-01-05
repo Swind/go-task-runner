@@ -13,9 +13,8 @@ type TaskScheduler struct {
 
 	delayManager *DelayManager
 
-	metricQueued  int32 // Waiting in ReadyQueue
-	metricActive  int32 // Executing in Worker
-	metricDelayed int32 // Waiting in DelayManager
+	metricQueued int32 // Waiting in ReadyQueue
+	metricActive int32 // Executing in Worker
 
 	// Handlers and Metrics
 	panicHandler        PanicHandler

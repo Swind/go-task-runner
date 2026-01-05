@@ -309,7 +309,6 @@ func TestThreadPoolTaskRunner_GC_GlobalThreadPool(t *testing.T) {
 
 	runner1 = nil
 	runner2 = nil
-	pool = nil
 
 	// Force GC
 	for i := 0; i < 5; i++ {

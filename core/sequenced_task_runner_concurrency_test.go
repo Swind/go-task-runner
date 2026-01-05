@@ -401,7 +401,7 @@ func TestSequencedTaskRunner_NoSpuriousRunLoops(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	runner.WaitIdle(ctx)
+	_ = runner.WaitIdle(ctx)
 
 	// Assert - Verify final runningCount is 0
 	finalRC := runner.GetRunningCount()

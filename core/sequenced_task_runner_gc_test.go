@@ -445,7 +445,7 @@ func TestSequencedTaskRunner_GC_MemoryGrowth(t *testing.T) {
 
 		if i%100 == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			runner.WaitIdle(ctx)
+			_ = runner.WaitIdle(ctx)
 			cancel()
 		}
 	}
@@ -646,9 +646,8 @@ func TestSequencedTaskRunner_GC_TaskAndReplyWithResult(t *testing.T) {
 				return obj.ID, nil
 			},
 			func(ctx context.Context, result string, err error) {
-				if result != "task-reply-result-obj" {
-					// Ensure we used the result
-				}
+				// Ensure we used the result
+				_ = result
 				close(done)
 			},
 			uiRunner,

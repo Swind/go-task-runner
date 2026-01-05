@@ -426,7 +426,7 @@ func TestSingleThreadTaskRunner_GC_MemoryGrowth(t *testing.T) {
 
 		if i%100 == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			runner.WaitIdle(ctx)
+			_ = runner.WaitIdle(ctx)
 			cancel()
 		}
 	}
@@ -547,7 +547,6 @@ func TestSingleThreadTaskRunner_GC_DedicatedGoroutineCleanup(t *testing.T) {
 	for _, runner := range runners {
 		runner.Stop()
 	}
-	runners = nil
 
 	time.Sleep(100 * time.Millisecond)
 	for i := 0; i < 5; i++ {

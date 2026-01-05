@@ -444,12 +444,12 @@ func TestSequencedTaskRunner_MultipleWaitShutdown(t *testing.T) {
 
 	// Act - Start two goroutines waiting for shutdown, then trigger shutdown
 	go func() {
-		runner.WaitShutdown(context.Background())
+		_ = runner.WaitShutdown(context.Background())
 		waiter1Done.Store(true)
 	}()
 
 	go func() {
-		runner.WaitShutdown(context.Background())
+		_ = runner.WaitShutdown(context.Background())
 		waiter2Done.Store(true)
 	}()
 
