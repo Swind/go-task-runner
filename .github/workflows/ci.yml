@@ -7,13 +7,60 @@ on:
     branches: ['main', 'v*.*.*']
   workflow_dispatch:
 
+# Set permissions (Critical for GitHub report integration)
+permissions:
+  contents: read          # Read code
+  checks: write           # Allow writing test reports (JUnit)
+  security-events: write  # Allow writing Code Scanning results (SARIF)
+
 jobs:
+  # ========================================================
+  # 1. Code Quality Check (Lint)
+  # ========================================================
+  lint:
+    name: Lint & Report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      # Run golangci-lint and generate three outputs: Console (colored), SARIF (GitHub), HTML (Artifact)
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m --out-format=colored-line-number,sarif:lint.sarif,html:lint.html
+
+      # Upload HTML report for download (Artifacts)
+      - name: Upload Lint HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: lint.html
+
+      # Upload SARIF report to GitHub Security (Code Scanning)
+      - name: Upload SARIF to GitHub
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: lint.sarif
+
+  # ========================================================
+  # 2. Unit Tests and Coverage
+  # ========================================================
   test:
-    name: Test
+    name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ['1.21', '1.22', '1.23']
+        go-version: ['1.22', '1.23', '1.24'] # Matrix testing across different versions
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,26 +73,55 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run tests with coverage
+      # Install gotestsum tool (used to generate JUnit XML report)
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+
+      # Run tests
+      # --junitfile: Generate XML report
+      # -- -coverprofile: Pass arguments to go test
+      - name: Run tests with gotestsum
         run: |
-          go test -v -coverprofile=coverage.out ./...
+          gotestsum --junitfile unit-tests.xml -- -coverprofile=coverage.out -v ./...
 
-      - name: Generate coverage report
-        run: go tool cover -html=coverage.out -o coverage.html
+      # Integrate test results into GitHub Checks UI
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure() # Generate report even if tests fail
+        with:
+          report_paths: 'unit-tests.xml'
+          include_passed: true
+          detailed_summary: true
 
-      - name: Upload coverage to artifacts
+      # [Go 1.24 only] Generate detailed Job Summary coverage report
+      - name: Generate Coverage Report for Summary
+        if: matrix.go-version == '1.24'
+        run: |
+          TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | grep -o '[0-9.]*%')
+          
+          echo "## 📊 Coverage Summary (Go 1.24)" >> $GITHUB_STEP_SUMMARY
+          echo "**Total Coverage:** $TOTAL_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Click to expand detailed Package coverage list</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | grep -v "total:" | awk '{print "| " $1 " | " $3 " |"}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      # Upload coverage artifacts (Used by Badge Job)
+      - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
           name: coverage-go-${{ matrix.go-version }}
           path: |
             coverage.out
-            coverage.html
+            unit-tests.xml
 
-      - name: Display coverage summary
-        run: |
-          echo "=== Coverage Summary ==="
-          go tool cover -func=coverage.out | tail -1
-
+  # ========================================================
+  # 3. Run Examples
+  # ========================================================
   examples:
     name: Run Examples
     runs-on: ubuntu-latest
@@ -56,36 +132,39 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Run basic_sequence example
-        run: go run examples/basic_sequence/main.go
+      # Automatically scan and run all main.go files under examples/
+      - name: Run all examples
+        run: |
+          # 1. Find all main.go files and sort them (Ensure fixed execution order)
+          # Use temp file to avoid exit code swallowing issue caused by pipes
+          find examples -name "main.go" | sort > examples_list.txt
+          
+          echo "Found the following examples:"
+          cat examples_list.txt
+          echo "------------------------------------------------"
 
-      - name: Run single_thread example
-        run: go run examples/single_thread/main.go
-
-      - name: Run task_and_reply example
-        run: go run examples/task_and_reply/main.go
-
-      - name: Run repeating_task example
-        run: go run examples/repeating_task/main.go
-
-      - name: Run shutdown example
-        run: go run examples/shutdown/main.go
-
-      - name: Run delayed_task example
-        run: go run examples/delayed_task/main.go
-
-      - name: Run mixed_priority example
-        run: go run examples/mixed_priority/main.go
-
+          # 2. Read and execute one by one
+          while read file; do
+            echo "🚀 Running example: $file"
+            
+            # Execute go run; if it fails, the entire CI fails and stops
+            go run "$file"
+            
+            echo "✅ Success: $file"
+            echo "------------------------------------------------"
+          done < examples_list.txt
+  # ========================================================
+  # 4. Update README Badge - Only execute when merging to main
+  # ========================================================
   coverage-badge:
     name: Generate Coverage Badge
     runs-on: ubuntu-latest
-    needs: test
+    needs: test # Must wait for tests to finish
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -94,12 +173,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Download coverage artifact
         uses: actions/download-artifact@v4
         with:
-          name: coverage-go-1.23
+          name: coverage-go-1.24 # Download Go 1.24 report
           path: .
 
       - name: Generate coverage percentage
