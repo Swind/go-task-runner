@@ -3,10 +3,30 @@ package core
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Task is the unit of work (Closure)
 type Task func(ctx context.Context)
+
+// TaskID is a unique identifier for tasks, using UUID for guaranteed uniqueness.
+type TaskID uuid.UUID
+
+// String returns the string representation of the TaskID.
+func (id TaskID) String() string {
+	return uuid.UUID(id).String()
+}
+
+// GenerateTaskID creates a new unique TaskID.
+func GenerateTaskID() TaskID {
+	return TaskID(uuid.New())
+}
+
+// IsZero returns true if the TaskID is the zero UUID.
+func (id TaskID) IsZero() bool {
+	return uuid.UUID(id) == uuid.Nil
+}
 
 // =============================================================================
 // TaskTraits: Define task attributes (priority, blocking behavior, etc.)

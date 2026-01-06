@@ -15,11 +15,13 @@ const (
 type TaskItem struct {
 	Task   Task
 	Traits TaskTraits
+	ID     TaskID // Unique identifier for the task
 }
 
 // TaskQueue defines the interface for different queue implementations
 type TaskQueue interface {
 	Push(t Task, traits TaskTraits)
+	PushWithID(t Task, traits TaskTraits) TaskID // Push with specific TaskID
 	Pop() (TaskItem, bool)
 	PopUpTo(max int) []TaskItem
 	PeekTraits() (TaskTraits, bool)
@@ -45,9 +47,17 @@ func NewFIFOTaskQueue() *FIFOTaskQueue {
 }
 
 func (q *FIFOTaskQueue) Push(t Task, traits TaskTraits) {
+	q.PushWithID(t, traits)
+}
+
+func (q *FIFOTaskQueue) PushWithID(t Task, traits TaskTraits) TaskID {
+	id := GenerateTaskID()
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.tasks = append(q.tasks, TaskItem{Task: t, Traits: traits})
+
+	q.tasks = append(q.tasks, TaskItem{Task: t, Traits: traits, ID: id})
+	return id
 }
 
 func (q *FIFOTaskQueue) Pop() (TaskItem, bool) {
@@ -216,6 +226,12 @@ func NewPriorityTaskQueue() *PriorityTaskQueue {
 }
 
 func (q *PriorityTaskQueue) Push(t Task, traits TaskTraits) {
+	q.PushWithID(t, traits)
+}
+
+func (q *PriorityTaskQueue) PushWithID(t Task, traits TaskTraits) TaskID {
+	// Generate a new TaskID for this task
+	id := GenerateTaskID()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -233,12 +249,13 @@ func (q *PriorityTaskQueue) Push(t Task, traits TaskTraits) {
 	}
 
 	item := &priorityItem{
-		TaskItem: TaskItem{Task: t, Traits: traits},
+		TaskItem: TaskItem{Task: t, Traits: traits, ID: id},
 		sequence: q.nextSequence,
 	}
 	q.nextSequence++
 
 	heap.Push(&q.pq, item)
+	return id
 }
 
 func (q *PriorityTaskQueue) Pop() (TaskItem, bool) {
