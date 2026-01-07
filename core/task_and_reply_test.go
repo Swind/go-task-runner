@@ -228,7 +228,9 @@ func TestPostTaskAndReplyWithResult_IntResult(t *testing.T) {
 		},
 		func(ctx context.Context, result int, err error) {
 			receivedResult.Store(int32(result))
-			receivedError.Store(err)
+			if err != nil {
+				receivedError.Store(err)
+			}
 		},
 		replyRunner,
 	)

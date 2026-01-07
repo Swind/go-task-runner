@@ -14,7 +14,7 @@ func main() {
 	taskrunner.InitGlobalThreadPool(8)
 	defer taskrunner.ShutdownGlobalThreadPool()
 
-	fmt.Println("=== ParallelTaskRunner Example ===\n")
+	fmt.Println("=== ParallelTaskRunner Example ===")
 
 	// Example 1: Basic Parallel Execution with Concurrency Limit
 	basicParallelExample()
@@ -105,7 +105,7 @@ func priorityExample() {
 	}
 
 	runner.WaitIdle(context.Background())
-	fmt.Println("All priority tasks completed\n")
+	fmt.Println("All priority tasks completed")
 }
 
 // flushAsyncExample demonstrates FlushAsync barrier semantics
@@ -153,7 +153,7 @@ func flushAsyncExample() {
 	runner.WaitIdle(context.Background())
 
 	fmt.Printf("Event order: %v\n", events)
-	fmt.Println("Notice: FlushCallback appears AFTER Task1-3, BEFORE Task4-6\n")
+	fmt.Println("Notice: FlushCallback appears AFTER Task1-3, BEFORE Task4-6")
 }
 
 // repeatingTaskExample demonstrates repeating tasks
@@ -228,5 +228,5 @@ func taskAndReplyExample() {
 	bgRunner.WaitIdle(context.Background())
 	uiRunner.WaitIdle(context.Background())
 
-	fmt.Println("Task and reply pattern completed\n")
+	fmt.Println("Task and reply pattern completed")
 }

@@ -30,11 +30,12 @@ jobs:
           go-version: '1.24'
 
       # Run golangci-lint and generate three outputs: Console (colored), SARIF (GitHub), HTML (Artifact)
+      # Note: Lints core/ and root directory only, excludes examples/
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --timeout=5m --out-format=colored-line-number,sarif:lint.sarif,html:lint.html
+          args: --timeout=5m --out-format=colored-line-number,sarif:lint.sarif,html:lint.html core/... .
 
       # Upload HTML report for download (Artifacts)
       - name: Upload Lint HTML Report
