@@ -1,2 +1,3 @@
-go-task-runner
+# Build binary at root level (not .claude/skills/go-task-runner/)
+/go-task-runner
 .worktrees
