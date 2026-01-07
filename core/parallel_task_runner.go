@@ -119,12 +119,6 @@ func (r *ParallelTaskRunner) removeBarrier(id TaskID) {
 	delete(r.barrierTaskIDs, id)
 }
 
-func (r *ParallelTaskRunner) hasBarrierTasks() bool {
-	r.barrierMu.RLock()
-	defer r.barrierMu.RUnlock()
-	return len(r.barrierTaskIDs) > 0
-}
-
 // IsClosed returns true if the runner has been shut down.
 func (r *ParallelTaskRunner) IsClosed() bool {
 	return r.closed.Load()

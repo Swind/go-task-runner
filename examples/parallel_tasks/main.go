@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
@@ -30,6 +31,9 @@ func main() {
 
 	// Example 5: Task and Reply Pattern
 	taskAndReplyExample()
+
+	// Example 6: High Concurrency Performance Test
+	highConcurrencyExample()
 
 	fmt.Println("\n=== All Examples Finished ===")
 }
@@ -104,7 +108,9 @@ func priorityExample() {
 		}, taskrunner.TaskTraits{Priority: task.priority})
 	}
 
-	runner.WaitIdle(context.Background())
+	if err := runner.WaitIdle(context.Background()); err != nil {
+		fmt.Printf("Error waiting for idle: %v\n", err)
+	}
 	fmt.Println("All priority tasks completed")
 }
 
@@ -150,7 +156,9 @@ func flushAsyncExample() {
 		})
 	}
 
-	runner.WaitIdle(context.Background())
+	if err := runner.WaitIdle(context.Background()); err != nil {
+		fmt.Printf("Error waiting for idle: %v\n", err)
+	}
 
 	fmt.Printf("Event order: %v\n", events)
 	fmt.Println("Notice: FlushCallback appears AFTER Task1-3, BEFORE Task4-6")
@@ -225,8 +233,84 @@ func taskAndReplyExample() {
 		uiRunner, // Reply runs on UI runner
 	)
 
-	bgRunner.WaitIdle(context.Background())
-	uiRunner.WaitIdle(context.Background())
+	if err := bgRunner.WaitIdle(context.Background()); err != nil {
+		fmt.Printf("Error waiting for background runner: %v\n", err)
+	}
+	if err := uiRunner.WaitIdle(context.Background()); err != nil {
+		fmt.Printf("Error waiting for UI runner: %v\n", err)
+	}
 
 	fmt.Println("Task and reply pattern completed")
+}
+
+// highConcurrencyExample demonstrates high concurrency performance
+// 100 tasks, each sleeping 1 second, with 50 concurrent workers
+// Should complete in ~2 seconds (2 batches of 50 tasks)
+func highConcurrencyExample() {
+	fmt.Println("\n--- Example 6: High Concurrency Performance Test ---")
+	fmt.Println("Running 100 tasks (each 1s) with 50 concurrent workers")
+
+	// Create a dedicated thread pool with 50 workers for this test
+	pool := taskrunner.NewGoroutineThreadPool("HighConcurrencyPool", 50)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Create a ParallelTaskRunner with 50 concurrent tasks
+	runner := taskrunner.NewParallelTaskRunner(
+		pool,
+		50, // maxConcurrency: 50 tasks run simultaneously
+	)
+	defer runner.Shutdown()
+
+	var completed sync.WaitGroup
+	var completedCount int32
+
+	// Record start time
+	startTime := time.Now()
+
+	// Post 100 tasks, each sleeping 1 second
+	for i := 1; i <= 100; i++ {
+		id := i
+		completed.Add(1)
+		runner.PostTask(func(ctx context.Context) {
+			defer completed.Done()
+
+			// Simulate 1 second of work
+			time.Sleep(1 * time.Second)
+
+			// Track completion
+			count := atomic.AddInt32(&completedCount, 1)
+
+			if (id-1)%10 == 0 {
+				fmt.Printf("  Task %d completed (total: %d/100)\n", id, count)
+			}
+		})
+	}
+
+	// Wait in idle to ensure all tasks are posted
+	err := runner.WaitIdle(context.Background())
+	if err != nil {
+		fmt.Printf("Error waiting for idle: %v\n", err)
+	}
+
+	// completed should be done when all tasks finish
+	completed.Wait()
+	duration := time.Since(startTime)
+
+	// Verify results
+	fmt.Printf("\n✓ All 100 tasks completed!\n")
+	fmt.Printf("  Execution time: %.2f seconds\n", duration.Seconds())
+
+	// Verify completion time (should be ~2 seconds with 50 concurrent workers)
+	expectedTime := 2 * time.Second
+	maxTime := 3 * time.Second
+
+	if duration < maxTime {
+		fmt.Printf("  ✓ PASS: Completed within 3 seconds (expected ~%.1fs)\n", expectedTime.Seconds())
+		fmt.Printf("  Performance: %.1fx faster than sequential execution\n", 100.0/duration.Seconds())
+	} else {
+		fmt.Printf("  ✗ FAIL: Took longer than 3 seconds (expected ~%.1fs)\n", expectedTime.Seconds())
+	}
+
+	fmt.Println()
 }
