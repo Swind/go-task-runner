@@ -220,7 +220,7 @@ See [examples/shutdown](examples/shutdown/main.go) for more examples.
 
 ## Architecture
 
-See [DESIGN.md](DESIGN.md) for a deep dive into the internal architecture, including how the `TaskScheduler`, `DelayManager`, and `TaskQueue` interact.
+See [DESIGN.md](docs/DESIGN.md) for a deep dive into the internal architecture, including how the `TaskScheduler`, `DelayManager`, and `TaskQueue` interact.
 
 ## License
 
