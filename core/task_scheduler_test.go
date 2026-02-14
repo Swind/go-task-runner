@@ -2,8 +2,6 @@ package core
 
 import (
 	"context"
-	"io"
-	"os"
 	"testing"
 	"time"
 )
@@ -34,11 +32,11 @@ func TestPriorityTaskScheduler_ExecutionOrder(t *testing.T) {
 
 	// Assert - Verify tasks are returned in priority order
 	for i, exp := range expected {
-		task, ok := s.GetWork(stopCh)
+		item, ok := s.GetWork(stopCh)
 		if !ok {
 			t.Fatalf("step %d: expected task but got none", i)
 		}
-		task(context.Background())
+		item.Task(context.Background())
 
 		got := <-results
 		if got != exp {
@@ -71,11 +69,11 @@ func TestFIFOTaskScheduler_ExecutionOrder(t *testing.T) {
 
 	// Assert - Verify tasks are returned in insertion order
 	for i, exp := range expected {
-		task, ok := s.GetWork(stopCh)
+		item, ok := s.GetWork(stopCh)
 		if !ok {
 			t.Fatalf("step %d: expected task but got none", i)
 		}
-		task(context.Background())
+		item.Task(context.Background())
 
 		got := <-results
 		if got != exp {
@@ -163,11 +161,6 @@ func TestTaskScheduler_Metrics(t *testing.T) {
 // When: Shutdown is called
 // Then: the queue is cleared and new tasks are rejected
 func TestTaskScheduler_Shutdown(t *testing.T) {
-	// Capture stdout to prevent test output from being flagged as failure
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	// Arrange - Create scheduler and post a task
 	s := NewPriorityTaskScheduler(1)
 	noop := func(ctx context.Context) {}
@@ -184,11 +177,6 @@ func TestTaskScheduler_Shutdown(t *testing.T) {
 
 	// Assert - Verify new tasks are rejected
 	s.PostInternal(noop, DefaultTaskTraits())
-
-	// Restore stdout
-	_ = w.Close()
-	os.Stdout = old
-	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	gotQueued = s.QueuedTaskCount()
 	wantQueued = 1
@@ -294,39 +282,19 @@ func (m *MockTaskRunner) GetThreadPool() ThreadPool              { return nil }
 // When: ShutdownGraceful is called with 1 second timeout
 // Then: shutdown completes immediately and new tasks are rejected
 func TestTaskScheduler_ShutdownGraceful_EmptyQueue(t *testing.T) {
-	// Capture stdout to prevent test output from being flagged as failure
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	// Arrange - Create scheduler with empty queue
 	s := NewPriorityTaskScheduler(2)
 
 	// Act - Call ShutdownGraceful (should complete immediately)
 	err := s.ShutdownGraceful(1 * time.Second)
 
-	// Restore stdout
-	_ = w.Close()
-	os.Stdout = old
-	_, _ = io.Copy(io.Discard, r) // Discard captured output
-
 	// Assert - Verify shutdown succeeded
 	if err != nil {
 		t.Fatalf("ShutdownGraceful failed: %v", err)
 	}
 
-	// Capture stdout again for the second part
-	old = os.Stdout
-	r, w, _ = os.Pipe()
-	os.Stdout = w
-
 	// Assert - Verify new tasks are rejected
 	s.PostInternal(func(ctx context.Context) {}, DefaultTaskTraits())
-
-	// Restore stdout
-	_ = w.Close()
-	os.Stdout = old
-	_, _ = io.Copy(io.Discard, r) // Discard captured output
 
 	gotQueued := s.QueuedTaskCount()
 	wantQueued := 0

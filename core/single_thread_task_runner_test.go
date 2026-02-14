@@ -41,23 +41,27 @@ func TestSingleThreadTaskRunner_ExecutionOrder(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
-	var order []int
-	var mu atomic.Value
-	mu.Store(&order)
+	results := make(chan int, 10)
 
 	// Act - Post 10 tasks
 	for i := 0; i < 10; i++ {
 		id := i
 		runner.PostTask(func(ctx context.Context) {
-			ptr := mu.Load().(*[]int)
-			*ptr = append(*ptr, id)
+			results <- id
 		})
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
 	// Assert - All tasks executed in order
-	result := *mu.Load().(*[]int)
+	result := make([]int, 0, 10)
+	timeout := time.After(500 * time.Millisecond)
+	for len(result) < 10 {
+		select {
+		case v := <-results:
+			result = append(result, v)
+		case <-timeout:
+			t.Fatalf("timed out waiting for results, got=%d", len(result))
+		}
+	}
 	if len(result) != 10 {
 		t.Fatalf("len(result) = %d, want 10", len(result))
 	}
@@ -78,9 +82,7 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 	runner := NewSingleThreadTaskRunner()
 	defer runner.Stop()
 
-	goroutineIDs := make(map[uint64]bool)
-	var mu atomic.Value
-	mu.Store(&goroutineIDs)
+	gidCh := make(chan uint64, 20)
 
 	// Helper to get goroutine ID
 	getGoroutineID := func() uint64 {
@@ -101,15 +103,21 @@ func TestSingleThreadTaskRunner_ThreadAffinity(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		runner.PostTask(func(ctx context.Context) {
 			gid := getGoroutineID()
-			ptr := mu.Load().(*map[uint64]bool)
-			(*ptr)[gid] = true
+			gidCh <- gid
 		})
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
 	// Assert - All tasks ran on same goroutine
-	result := *mu.Load().(*map[uint64]bool)
+	result := make(map[uint64]bool)
+	timeout := time.After(500 * time.Millisecond)
+	for i := 0; i < 20; i++ {
+		select {
+		case gid := <-gidCh:
+			result[gid] = true
+		case <-timeout:
+			t.Fatalf("timed out waiting for goroutine IDs, got=%d", i)
+		}
+	}
 	if len(result) != 1 {
 		t.Errorf("goroutine count = %d, want 1 (all tasks on same goroutine)", len(result))
 	}
@@ -245,6 +253,43 @@ func TestSingleThreadTaskRunner_Shutdown(t *testing.T) {
 	// Assert
 	if !runner.IsClosed() {
 		t.Error("IsClosed() = false after Shutdown(), want true")
+	}
+}
+
+// TestSingleThreadTaskRunner_Shutdown_AllowsQueuedTasksToFinish verifies shutdown only closes intake.
+// Given: A runner with multiple already-queued tasks
+// When: Shutdown is called while the first task is running
+// Then: Already-queued tasks still execute to completion
+func TestSingleThreadTaskRunner_Shutdown_AllowsQueuedTasksToFinish(t *testing.T) {
+	// Arrange
+	runner := NewSingleThreadTaskRunner()
+	defer runner.Stop()
+
+	var executed atomic.Int32
+	blocker := make(chan struct{})
+
+	runner.PostTask(func(ctx context.Context) {
+		executed.Add(1)
+		<-blocker
+	})
+	runner.PostTask(func(ctx context.Context) {
+		executed.Add(1)
+	})
+	runner.PostTask(func(ctx context.Context) {
+		executed.Add(1)
+	})
+
+	time.Sleep(30 * time.Millisecond)
+
+	// Act
+	runner.Shutdown()
+	close(blocker)
+
+	time.Sleep(150 * time.Millisecond)
+
+	// Assert
+	if got := executed.Load(); got != 3 {
+		t.Errorf("executed = %d, want 3 (queued tasks should finish after Shutdown)", got)
 	}
 }
 

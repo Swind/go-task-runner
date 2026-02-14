@@ -147,7 +147,6 @@ func (dm *DelayManager) calculateNextRun() time.Duration {
 // This is more efficient than processing one at a time with continue
 func (dm *DelayManager) processExpiredTasks() {
 	dm.mu.Lock()
-	defer dm.mu.Unlock()
 
 	now := time.Now()
 	// Collect all expired tasks to avoid holding lock while posting
@@ -162,6 +161,8 @@ func (dm *DelayManager) processExpiredTasks() {
 		heap.Pop(&dm.pq)
 		expired = append(expired, item)
 	}
+
+	dm.mu.Unlock()
 
 	// Post expired tasks outside the lock
 	for _, item := range expired {

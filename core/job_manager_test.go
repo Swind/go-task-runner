@@ -969,10 +969,10 @@ func TestJobManager_RetryExhausted(t *testing.T) {
 	})
 
 	errorHandlerCalled := atomic.Bool{}
-	var lastError error
+	var lastError atomic.Value
 	manager.SetErrorHandler(func(jobID string, operation string, err error) {
 		errorHandlerCalled.Store(true)
-		lastError = err
+		lastError.Store(err)
 	})
 
 	logger := core.NewDefaultLogger()
@@ -1003,7 +1003,7 @@ func TestJobManager_RetryExhausted(t *testing.T) {
 		t.Error("Error handler not called after retry exhaustion")
 	}
 
-	if lastError == nil {
+	if lastError.Load() == nil {
 		t.Error("lastError = nil, want non-nil")
 	}
 
@@ -1342,7 +1342,7 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 	const concurrentSubmissions = 10
 	args := EmailArgs{To: "user@example.com"}
 	successCount := atomic.Int32{}
-	var firstErr error
+	var firstErr atomic.Value
 
 	var wg sync.WaitGroup
 	wg.Add(concurrentSubmissions)
@@ -1354,8 +1354,8 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 			err := manager.SubmitJob(context.Background(), "job1", "email", args, core.DefaultTaskTraits())
 			if err == nil {
 				successCount.Add(1)
-			} else if firstErr == nil {
-				firstErr = err
+			} else if firstErr.Load() == nil {
+				firstErr.Store(err)
 			}
 		}()
 	}
@@ -1369,7 +1369,7 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 		t.Errorf("successCount = %d, want 1", count)
 	}
 
-	if firstErr == nil {
+	if firstErr.Load() == nil {
 		t.Error("firstErr = nil, want error (duplicates rejected)")
 	}
 
@@ -1786,6 +1786,58 @@ func TestJobManager_Start_ConvertsRunningToFailed(t *testing.T) {
 
 	// Assert - Job status is FAILED
 	job, err := manager.GetJob(ctx, "running-job-1")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusFailed {
+		t.Errorf("Status = %s, want FAILED", job.Status)
+	}
+	if job.Result != "Interrupted by restart" {
+		t.Errorf("Result = %s, want 'Interrupted by restart'", job.Result)
+	}
+
+	// Cleanup
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = manager.Shutdown(shutdownCtx)
+}
+
+// TestJobManager_Start_WaitsForRecovery verifies Start() only returns after recovery IO completes.
+// Given: A RUNNING job in store from a previous run
+// When: Start is called
+// Then: Start returns after RUNNING job is converted to FAILED
+func TestJobManager_Start_WaitsForRecovery(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	ctx := context.Background()
+	runningJob := &core.JobEntity{
+		ID:       "running-job-sync-start",
+		Type:     "email",
+		ArgsData: []byte(`{"to":"test@example.com"}`),
+		Status:   core.JobStatusRunning,
+		Priority: 1,
+	}
+	_ = store.SaveJob(ctx, runningJob)
+
+	// Act
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Assert - no extra sleep needed; Start should be synchronous for recovery IO
+	job, err := manager.GetJob(ctx, "running-job-sync-start")
 	if err != nil {
 		t.Fatalf("GetJob failed: %v", err)
 	}

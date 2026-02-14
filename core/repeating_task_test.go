@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -210,17 +211,23 @@ func TestRepeatingTask_ContextPropagation(t *testing.T) {
 	runner := NewSequencedTaskRunner(pool)
 
 	var gotRunner atomic.Bool
-	var handle RepeatingTaskHandle
+	done := make(chan struct{})
+	var once sync.Once
 
-	handle = runner.PostRepeatingTask(func(ctx context.Context) {
+	handle := runner.PostRepeatingTask(func(ctx context.Context) {
 		r := GetCurrentTaskRunner(ctx)
 		if r != nil {
 			gotRunner.Store(true)
 		}
-		handle.Stop()
+		once.Do(func() { close(done) })
 	}, 50*time.Millisecond)
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for repeating task execution")
+	}
+	handle.Stop()
 
 	// Assert
 	if !gotRunner.Load() {
@@ -253,14 +260,14 @@ func (tp *testThreadPool) start() {
 
 func (tp *testThreadPool) worker() {
 	for {
-		task, ok := tp.scheduler.GetWork(tp.ctx.Done())
+		item, ok := tp.scheduler.GetWork(tp.ctx.Done())
 		if !ok {
 			return
 		}
 		tp.scheduler.OnTaskStart()
 		func() {
 			defer tp.scheduler.OnTaskEnd()
-			task(tp.ctx)
+			item.Task(tp.ctx)
 		}()
 	}
 }

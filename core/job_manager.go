@@ -477,30 +477,34 @@ func (m *JobManager) GetActiveJobs() []*JobEntity {
 
 // Start initializes the JobManager and recovers unfinished jobs
 func (m *JobManager) Start(ctx context.Context) error {
-	errChan := make(chan error, 1)
-
-	m.controlRunner.PostTask(func(_ context.Context) {
-		errChan <- m.startRecovery(ctx)
-	})
-
-	return <-errChan
+	// Run recovery from the caller goroutine. startRecovery/doRecoveryIO may post
+	// work back to controlRunner and wait for completion, so wrapping Start itself
+	// inside controlRunner can deadlock.
+	return m.startRecovery(ctx)
 }
 
 func (m *JobManager) startRecovery(ctx context.Context) error {
-	// Delegate IO operations to ioRunner
+	// Delegate IO operations to ioRunner and wait for completion.
+	// Start() should not return before recovery flow finishes.
+	done := make(chan error, 1)
 	m.ioRunner.PostTask(func(_ context.Context) {
-		m.doRecoveryIO(ctx)
+		done <- m.doRecoveryIO(ctx)
 	})
 
-	return nil
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-func (m *JobManager) doRecoveryIO(ctx context.Context) {
+func (m *JobManager) doRecoveryIO(ctx context.Context) error {
 	// 1. Mark RUNNING jobs as FAILED (interrupted by restart)
 	runningJobs, err := m.store.ListJobs(ctx, JobFilter{Status: JobStatusRunning})
 	if err != nil {
 		m.logger.Error("Failed to list running jobs during recovery", F("error", err))
-		return
+		return err
 	}
 
 	for _, job := range runningJobs {
@@ -513,17 +517,19 @@ func (m *JobManager) doRecoveryIO(ctx context.Context) {
 	// 2. Recover PENDING jobs
 	jobs, err := m.store.GetRecoverableJobs(ctx)
 	if err != nil {
-		return
+		return err
 	}
 
 	// 3. Schedule recovered jobs (via controlRunner)
 	for _, job := range jobs {
 		jobCopy := job
 
+		done := make(chan struct{})
 		m.controlRunner.PostTask(func(_ context.Context) {
 			// Get handler
 			rawHandler, ok := m.handlers.Load(jobCopy.Type)
 			if !ok {
+				close(done)
 				return
 			}
 			handler := rawHandler.(RawJobHandler)
@@ -541,8 +547,16 @@ func (m *JobManager) doRecoveryIO(ctx context.Context) {
 			// Schedule execution
 			traits := TaskTraits{Priority: TaskPriority(jobCopy.Priority)}
 			m.scheduleExecution(jobCopy, jobCtx, handler, traits, 0)
+			close(done)
 		})
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+
+	return nil
 }
 
 // Shutdown gracefully shuts down the JobManager

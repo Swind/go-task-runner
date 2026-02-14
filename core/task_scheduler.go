@@ -125,19 +125,19 @@ func (s *TaskScheduler) PostDelayedInternal(task Task, delay time.Duration, trai
 }
 
 // GetWork (Called by Worker)
-func (s *TaskScheduler) GetWork(stopCh <-chan struct{}) (Task, bool) {
+func (s *TaskScheduler) GetWork(stopCh <-chan struct{}) (TaskItem, bool) {
 	for {
 		// Try to pop one task
 		if item, ok := s.queue.Pop(); ok {
 			atomic.AddInt32(&s.metricQueued, -1) // Metric-- (Left Queue)
-			return item.Task, true
+			return item, true
 		}
 
 		select {
 		case <-s.signal:
 			continue
 		case <-stopCh:
-			return nil, false
+			return TaskItem{}, false
 		}
 	}
 }

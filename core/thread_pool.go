@@ -6,7 +6,7 @@ import (
 )
 
 type WorkSource interface {
-	GetWork(stopCh <-chan struct{}) (Task, bool)
+	GetWork(stopCh <-chan struct{}) (TaskItem, bool)
 }
 
 // =============================================================================

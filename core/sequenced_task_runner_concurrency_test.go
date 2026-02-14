@@ -135,8 +135,8 @@ func TestSequencedTaskRunner_RunningCountInvariant(t *testing.T) {
 	}
 
 	// Assert - Verify runningCount never exceeded 1
-	if maxRunningCount > 1 {
-		t.Errorf("max runningCount: got = %d (want <= 1)", maxRunningCount)
+	if atomic.LoadInt32(&maxRunningCount) > 1 {
+		t.Errorf("max runningCount: got = %d (want <= 1)", atomic.LoadInt32(&maxRunningCount))
 	}
 
 	// Assert - Verify final state

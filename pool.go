@@ -161,7 +161,7 @@ func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 
 	for {
 		// Pull tasks from WorkSource
-		task, ok := tg.scheduler.GetWork(stopCh)
+		item, ok := tg.scheduler.GetWork(stopCh)
 		if !ok {
 			// WorkSource closed or context canceled
 			return
@@ -189,14 +189,12 @@ func (tg *GoroutineThreadPool) workerLoop(id int, ctx context.Context) {
 					if metrics != nil {
 						metrics.RecordTaskPanic(poolName, r)
 					}
-				} else {
-					// Record successful task completion
-					if metrics != nil {
-						metrics.RecordTaskDuration(poolName, core.TaskPriorityUserVisible, duration)
-					}
+				} else if metrics != nil {
+					// Record successful task completion with the actual task priority.
+					metrics.RecordTaskDuration(poolName, item.Traits.Priority, duration)
 				}
 			}()
-			task(ctx)
+			item.Task(ctx)
 		}()
 	}
 }

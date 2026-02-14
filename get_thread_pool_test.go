@@ -2,7 +2,9 @@ package taskrunner_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
 	"github.com/Swind/go-task-runner/core"
@@ -44,25 +46,28 @@ func TestGetThreadPool(t *testing.T) {
 	}
 
 	// Act - Execute tasks on both runners
-	done := make(chan struct{})
-	var count int
+	done := make(chan struct{}, 1)
+	var count atomic.Int32
 
 	runner1.PostTask(func(ctx context.Context) {
-		count++
+		count.Add(1)
 	})
 
 	runner2.PostTask(func(ctx context.Context) {
-		count++
-		if count == 2 {
-			close(done)
+		if count.Add(1) == 2 {
+			done <- struct{}{}
 		}
 	})
 
-	<-done
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for both tasks")
+	}
 
 	// Assert - Verify both tasks executed
-	gotCount := count
-	wantCount := 2
+	gotCount := count.Load()
+	wantCount := int32(2)
 	if gotCount != wantCount {
 		t.Errorf("tasks executed: got = %d, want = %d", gotCount, wantCount)
 	}

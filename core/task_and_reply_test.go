@@ -61,28 +61,31 @@ func TestPostTaskAndReply_ExecutionOrder(t *testing.T) {
 	targetRunner := NewSequencedTaskRunner(pool)
 	replyRunner := NewSequencedTaskRunner(pool)
 
-	var executionOrder []string
-	var mu atomic.Value
-	mu.Store(&executionOrder)
+	orderCh := make(chan string, 2)
 
 	// Act
 	targetRunner.PostTaskAndReply(
 		func(ctx context.Context) {
 			time.Sleep(50 * time.Millisecond)
-			ptr := mu.Load().(*[]string)
-			*ptr = append(*ptr, "task")
+			orderCh <- "task"
 		},
 		func(ctx context.Context) {
-			ptr := mu.Load().(*[]string)
-			*ptr = append(*ptr, "reply")
+			orderCh <- "reply"
 		},
 		replyRunner,
 	)
 
-	time.Sleep(150 * time.Millisecond)
-
 	// Assert
-	order := *mu.Load().(*[]string)
+	order := make([]string, 0, 2)
+	timeout := time.After(500 * time.Millisecond)
+	for len(order) < 2 {
+		select {
+		case v := <-orderCh:
+			order = append(order, v)
+		case <-timeout:
+			t.Fatalf("timed out waiting for order results, got=%d", len(order))
+		}
+	}
 	if len(order) != 2 {
 		t.Fatalf("len(order) = %d, want 2", len(order))
 	}
@@ -377,23 +380,35 @@ func TestPostDelayedTaskAndReplyWithResult_Timing(t *testing.T) {
 	replyRunner := NewSequencedTaskRunner(pool)
 
 	start := time.Now()
-	var taskTime, replyTime time.Time
+	taskTimeCh := make(chan time.Time, 1)
+	replyTimeCh := make(chan time.Time, 1)
 
 	// Act
 	PostDelayedTaskAndReplyWithResult(
 		targetRunner,
 		func(ctx context.Context) (int, error) {
-			taskTime = time.Now()
+			taskTimeCh <- time.Now()
 			return 42, nil
 		},
 		100*time.Millisecond,
 		func(ctx context.Context, result int, err error) {
-			replyTime = time.Now()
+			replyTimeCh <- time.Now()
 		},
 		replyRunner,
 	)
 
-	time.Sleep(200 * time.Millisecond)
+	var taskTime time.Time
+	var replyTime time.Time
+	select {
+	case taskTime = <-taskTimeCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for delayed task execution")
+	}
+	select {
+	case replyTime = <-replyTimeCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for reply execution")
+	}
 
 	// Assert - Task started after ~100ms
 	taskDelay := taskTime.Sub(start)
@@ -536,29 +551,32 @@ func TestPostTaskAndReplyWithResult_SameRunner(t *testing.T) {
 
 	runner := NewSequencedTaskRunner(pool)
 
-	var executionOrder []string
-	var mu atomic.Value
-	mu.Store(&executionOrder)
+	orderCh := make(chan string, 2)
 
 	// Act
 	PostTaskAndReplyWithResult(
 		runner,
 		func(ctx context.Context) (string, error) {
-			ptr := mu.Load().(*[]string)
-			*ptr = append(*ptr, "task")
+			orderCh <- "task"
 			return "result", nil
 		},
 		func(ctx context.Context, result string, err error) {
-			ptr := mu.Load().(*[]string)
-			*ptr = append(*ptr, "reply")
+			orderCh <- "reply"
 		},
 		runner,
 	)
 
-	time.Sleep(100 * time.Millisecond)
-
 	// Assert
-	order := *mu.Load().(*[]string)
+	order := make([]string, 0, 2)
+	timeout := time.After(500 * time.Millisecond)
+	for len(order) < 2 {
+		select {
+		case v := <-orderCh:
+			order = append(order, v)
+		case <-timeout:
+			t.Fatalf("timed out waiting for same-runner order results, got=%d", len(order))
+		}
+	}
 	if len(order) != 2 || order[0] != "task" || order[1] != "reply" {
 		t.Errorf("order = %v, want [task reply]", order)
 	}

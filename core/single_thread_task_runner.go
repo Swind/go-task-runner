@@ -298,8 +298,6 @@ func (r *SingleThreadTaskRunner) Shutdown() {
 	r.shutdownOnce.Do(func() {
 		// Mark as closed
 		r.closed.Store(true)
-		// Cancel context to stop accepting new tasks and unblock runLoop
-		r.cancel()
 		// Close shutdown channel to signal waiters
 		close(r.shutdownChan)
 	})
@@ -315,6 +313,9 @@ func (r *SingleThreadTaskRunner) Stop() {
 	r.once.Do(func() {
 		// 1. Mark as closed
 		r.closed.Store(true)
+		r.shutdownOnce.Do(func() {
+			close(r.shutdownChan)
+		})
 
 		// 2. Cancel context to stop accepting new tasks
 		r.cancel()
