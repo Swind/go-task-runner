@@ -48,6 +48,10 @@ go get github.com/Swind/go-task-runner
 
 說明：以下 code 片段聚焦在 API 重點；完整可執行程式請參考 `examples/*`。
 
+重要同步說明：
+- 當狀態只由單一 `SequencedTaskRunner`/`SingleThreadTaskRunner` 擁有並存取時，可採用 lock-free 寫法。
+- 當資料跨 goroutine 或跨 runner 傳遞時，請使用明確同步（`WaitIdle`、`WaitShutdown`、channel 或 `sync/atomic`）。
+
 ### 1. 初始化全域 Thread Pool
 
 ```go
@@ -160,6 +164,9 @@ core.PostTaskAndReplyWithResult(
 
 ### 3. 使用 Task Traits（優先級）
 
+Priority 效果通常在「多個 runner 競爭同一個 worker pool」時最明顯。  
+可參考：[`examples/mixed_priority/main.go`](examples/mixed_priority/main.go)
+
 ```go
 runner.PostTaskWithTraits(func(ctx context.Context) {
     println("High priority work!")
@@ -200,6 +207,19 @@ if runner.IsClosed() {
 ```
 
 更多可參考：[`examples/shutdown/main.go`](examples/shutdown/main.go)
+
+## 範例程式
+
+- [`examples/basic_sequence/main.go`](examples/basic_sequence/main.go)：基本序列執行與延遲任務。
+- [`examples/delayed_task/main.go`](examples/delayed_task/main.go)：延遲任務排程。
+- [`examples/repeating_task/main.go`](examples/repeating_task/main.go)：週期任務與停止機制。
+- [`examples/task_and_reply/main.go`](examples/task_and_reply/main.go)：Task-Reply 模式（含 `core` 的 generic 回傳 helper）。
+- [`examples/single_thread/main.go`](examples/single_thread/main.go)：單一執行緒 affinity 與同擁有者 lock-free 狀態管理。
+- [`examples/mixed_priority/main.go`](examples/mixed_priority/main.go)：多 runner 競爭下的優先級行為。
+- [`examples/shutdown/main.go`](examples/shutdown/main.go)：runner 生命週期與關閉語意。
+- [`examples/custom_handlers/main.go`](examples/custom_handlers/main.go)：自訂 panic/metrics/rejection handler。
+- [`examples/event_bus/main.go`](examples/event_bus/main.go)：以 sequenced runner 實作 event bus。
+- [`examples/parallel_tasks/main.go`](examples/parallel_tasks/main.go)：parallel runner 功能與併發上限示範。
 
 ## 架構文件
 

@@ -47,6 +47,10 @@ go get github.com/Swind/go-task-runner
 
 Note: The snippets below focus on specific APIs. For complete runnable programs, see `examples/*`.
 
+Important synchronization note:
+- Lock-free state updates are safe when the state is owned and accessed by a single `SequencedTaskRunner`/`SingleThreadTaskRunner`.
+- When data crosses goroutine or runner boundaries, use explicit synchronization (`WaitIdle`, `WaitShutdown`, channels, or `sync/atomic`).
+
 ### 1. Initialize the Global Thread Pool
 
 ```go
@@ -175,6 +179,9 @@ See [examples/task_and_reply](examples/task_and_reply/main.go) for more examples
 
 ### 3. Using Task Traits (Priorities)
 
+Priority effects are most visible when multiple runners compete for the same worker pool.
+See [examples/mixed_priority](examples/mixed_priority/main.go) for a focused demonstration.
+
 ```go
     runner.PostTaskWithTraits(func(ctx context.Context) {
         println("High priority work!")
@@ -227,6 +234,19 @@ Gracefully shutdown a runner to stop all tasks:
 ```
 
 See [examples/shutdown](examples/shutdown/main.go) for more examples.
+
+## Example Programs
+
+- [examples/basic_sequence](examples/basic_sequence/main.go): basic sequenced execution and delayed task.
+- [examples/delayed_task](examples/delayed_task/main.go): delayed task scheduling.
+- [examples/repeating_task](examples/repeating_task/main.go): repeating tasks and stop semantics.
+- [examples/task_and_reply](examples/task_and_reply/main.go): task-reply patterns (including generic result helpers in `core`).
+- [examples/single_thread](examples/single_thread/main.go): thread affinity and lock-free state on single runner ownership.
+- [examples/mixed_priority](examples/mixed_priority/main.go): priority behavior across competing runners.
+- [examples/shutdown](examples/shutdown/main.go): runner lifecycle and shutdown behavior.
+- [examples/custom_handlers](examples/custom_handlers/main.go): custom panic/metrics/rejection handlers.
+- [examples/event_bus](examples/event_bus/main.go): sequenced-runner event bus pattern.
+- [examples/parallel_tasks](examples/parallel_tasks/main.go): parallel runner features and concurrency limits.
 
 ## Architecture
 
