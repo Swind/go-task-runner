@@ -856,6 +856,52 @@ type FailingJobStore struct {
 	recovered   atomic.Bool
 }
 
+type DuplicateGetJobStore struct {
+	*core.MemoryJobStore
+}
+
+func NewDuplicateGetJobStore() *DuplicateGetJobStore {
+	return &DuplicateGetJobStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+	}
+}
+
+func (s *DuplicateGetJobStore) GetJob(ctx context.Context, id string) (*core.JobEntity, error) {
+	return &core.JobEntity{
+		ID:     id,
+		Status: core.JobStatusPending,
+	}, nil
+}
+
+type SaveFailJobStore struct {
+	*core.MemoryJobStore
+}
+
+func NewSaveFailJobStore() *SaveFailJobStore {
+	return &SaveFailJobStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+	}
+}
+
+func (s *SaveFailJobStore) SaveJob(ctx context.Context, job *core.JobEntity) error {
+	return fmt.Errorf("save failed intentionally")
+}
+
+type BlockingRecoveryStore struct {
+	*core.MemoryJobStore
+}
+
+func NewBlockingRecoveryStore() *BlockingRecoveryStore {
+	return &BlockingRecoveryStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+	}
+}
+
+func (s *BlockingRecoveryStore) ListJobs(ctx context.Context, filter core.JobFilter) ([]*core.JobEntity, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func NewFailingJobStore(maxFailures int) *FailingJobStore {
 	return &FailingJobStore{
 		MemoryJobStore: core.NewMemoryJobStore(),
@@ -939,6 +985,254 @@ func TestJobManager_RetrySuccess(t *testing.T) {
 	}
 	if job.Status != core.JobStatusCompleted {
 		t.Errorf("Status = %s, want COMPLETED", job.Status)
+	}
+}
+
+// TestJobManager_SubmitJobIO_DuplicateInStoreRollsBackActiveJobs verifies duplicate detection rolls back active tracking
+// Given: A manager backed by a store that reports duplicate jobs
+// When: SubmitJob is called for an existing ID
+// Then: No handler runs and active job count is rolled back to zero
+func TestJobManager_SubmitJobIO_DuplicateInStoreRollsBackActiveJobs(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		NewDuplicateGetJobStore(),
+		core.NewJSONSerializer(),
+	)
+
+	type Args struct {
+		Name string `json:"name"`
+	}
+
+	// Arrange
+	handlerRan := atomic.Bool{}
+	_ = core.RegisterHandler(manager, "dup", func(ctx context.Context, args Args) error {
+		handlerRan.Store(true)
+		return nil
+	})
+
+	// Act
+	err := manager.SubmitJob(context.Background(), "job-dup", "dup", Args{Name: "x"}, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob returned unexpected error: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Assert
+	if manager.GetActiveJobCount() != 0 {
+		t.Fatalf("active jobs = %d, want 0 after duplicate rollback", manager.GetActiveJobCount())
+	}
+	if handlerRan.Load() {
+		t.Fatal("handler should not run when duplicate exists in store")
+	}
+}
+
+// TestJobManager_SubmitJobIO_SaveFailureRollsBackActiveJobs verifies save failure rolls back active tracking
+// Given: A manager backed by a store that fails SaveJob
+// When: SubmitJob is called
+// Then: No handler runs and active job count is rolled back to zero
+func TestJobManager_SubmitJobIO_SaveFailureRollsBackActiveJobs(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		NewSaveFailJobStore(),
+		core.NewJSONSerializer(),
+	)
+
+	type Args struct {
+		Name string `json:"name"`
+	}
+
+	// Arrange
+	handlerRan := atomic.Bool{}
+	_ = core.RegisterHandler(manager, "savefail", func(ctx context.Context, args Args) error {
+		handlerRan.Store(true)
+		return nil
+	})
+
+	// Act
+	err := manager.SubmitJob(context.Background(), "job-save-fail", "savefail", Args{Name: "x"}, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob returned unexpected error: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Assert
+	if manager.GetActiveJobCount() != 0 {
+		t.Fatalf("active jobs = %d, want 0 after save failure rollback", manager.GetActiveJobCount())
+	}
+	if handlerRan.Load() {
+		t.Fatal("handler should not run when save fails")
+	}
+}
+
+// TestJobManager_RegisterHandler_AfterShutdown verifies handler registration is blocked after shutdown
+// Given: A shut down job manager
+// When: RegisterHandler is called
+// Then: Registration fails with an error
+func TestJobManager_RegisterHandler_AfterShutdown(t *testing.T) {
+	// Arrange
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Act
+	err := core.RegisterHandler(manager, "x", func(ctx context.Context, args struct{}) error { return nil })
+
+	// Assert
+	if err == nil {
+		t.Fatal("RegisterHandler() should fail after shutdown")
+	}
+}
+
+// TestJobManager_SubmitDelayedJob_SerializeError verifies delayed submit fails on non-serializable arguments
+// Given: A job manager with registered handler
+// When: SubmitDelayedJob is called with non-JSON-serializable args
+// Then: Submission returns serialization error
+func TestJobManager_SubmitDelayedJob_SerializeError(t *testing.T) {
+	// Arrange
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	// Arrange
+	_ = core.RegisterHandler(manager, "x", func(ctx context.Context, args map[string]string) error { return nil })
+	time.Sleep(50 * time.Millisecond)
+
+	// Act
+	err := manager.SubmitDelayedJob(
+		context.Background(),
+		"job-bad-args",
+		"x",
+		make(chan int), // channel is not JSON serializable
+		0,
+		core.DefaultTaskTraits(),
+	)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SubmitDelayedJob() should fail on serialization error")
+	}
+}
+
+// TestJobManager_CancelJob_NotFoundAndClosed verifies cancel behavior for missing and closed states
+// Given: A running manager and then a closed manager
+// When: CancelJob is called for missing ID and after shutdown
+// Then: Both calls return errors
+func TestJobManager_CancelJob_NotFoundAndClosed(t *testing.T) {
+	// Arrange
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	// Act and Assert
+	if err := manager.CancelJob("missing"); err == nil {
+		t.Fatal("CancelJob() should fail for missing job")
+	}
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Assert
+	if err := manager.CancelJob("anything"); err == nil {
+		t.Fatal("CancelJob() should fail when manager is closed")
+	}
+}
+
+// TestJobManager_Start_ContextCanceled verifies start fails fast with canceled context
+// Given: A manager using a blocking recovery store
+// When: Start is called with an already-canceled context
+// Then: Start returns context cancellation error
+func TestJobManager_Start_ContextCanceled(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		NewBlockingRecoveryStore(),
+		core.NewJSONSerializer(),
+	)
+
+	// Act
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Assert
+	if err := manager.Start(ctx); err == nil {
+		t.Fatal("Start() should return context cancellation error")
+	}
+}
+
+// TestJobManager_Shutdown_AlreadyClosedAndTimeout verifies timeout and repeated shutdown error paths
+// Given: A manager with an active blocking job
+// When: Shutdown is called with short timeout, then called again after close
+// Then: First call times out and second call reports already closed
+func TestJobManager_Shutdown_AlreadyClosedAndTimeout(t *testing.T) {
+	// Arrange
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type Args struct {
+		Val string `json:"val"`
+	}
+	block := make(chan struct{})
+	_ = core.RegisterHandler(manager, "block", func(ctx context.Context, args Args) error {
+		<-block
+		return nil
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	// Act
+	_ = manager.SubmitJob(context.Background(), "job-timeout", "block", Args{Val: "x"}, core.DefaultTaskTraits())
+
+	// Act
+	shortCtx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := manager.Shutdown(shortCtx)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Shutdown() should return context timeout when active jobs do not drain")
+	}
+
+	// Act
+	close(block)
+	time.Sleep(100 * time.Millisecond)
+
+	// Manager is now already marked closed due first shutdown call.
+	// Act
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+
+	// Assert
+	if err2 := manager.Shutdown(ctx2); err2 == nil {
+		t.Fatal("second Shutdown() should return already closed error")
 	}
 }
 

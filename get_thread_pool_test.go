@@ -48,15 +48,23 @@ func TestGetThreadPool(t *testing.T) {
 	// Act - Execute tasks on both runners
 	done := make(chan struct{}, 1)
 	var count atomic.Int32
+	trySignalDone := func() {
+		if count.Load() == 2 {
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		}
+	}
 
 	runner1.PostTask(func(ctx context.Context) {
 		count.Add(1)
+		trySignalDone()
 	})
 
 	runner2.PostTask(func(ctx context.Context) {
-		if count.Add(1) == 2 {
-			done <- struct{}{}
-		}
+		count.Add(1)
+		trySignalDone()
 	})
 
 	select {

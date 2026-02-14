@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,26 @@ import (
 
 	"github.com/Swind/go-task-runner/core"
 )
+
+type poolTestPanicHandler struct {
+	called atomic.Bool
+}
+
+func (h *poolTestPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
+	h.called.Store(true)
+}
+
+type poolTestMetrics struct {
+	panicCount atomic.Int32
+}
+
+func (m *poolTestMetrics) RecordTaskDuration(runnerName string, priority core.TaskPriority, duration time.Duration) {
+}
+func (m *poolTestMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
+	m.panicCount.Add(1)
+}
+func (m *poolTestMetrics) RecordQueueDepth(runnerName string, depth int)       {}
+func (m *poolTestMetrics) RecordTaskRejected(runnerName string, reason string) {}
 
 // Ensure GoroutineThreadPool fully implements ThreadPool interface
 var _ core.ThreadPool = (*GoroutineThreadPool)(nil)
@@ -53,6 +74,115 @@ func TestGoroutineThreadPool_Lifecycle(t *testing.T) {
 	// Assert - Not running after Stop()
 	if pool.IsRunning() {
 		t.Error("IsRunning() = true, want false (pool should not be running after Stop())")
+	}
+}
+
+// TestGoroutineThreadPool_StartIdempotentAndStopGracefulNotRunning verifies idempotent start and no-op graceful stop
+// Given: A new pool that has not started yet
+// When: StopGraceful is called before start, then Start is called twice
+// Then: StopGraceful returns nil and pool remains healthy/running until explicit stop
+func TestGoroutineThreadPool_StartIdempotentAndStopGracefulNotRunning(t *testing.T) {
+	// Arrange
+	pool := NewGoroutineThreadPool("idempotent-pool", 1)
+
+	// Act
+	if err := pool.StopGraceful(100 * time.Millisecond); err != nil {
+		t.Fatalf("StopGraceful on non-running pool = %v, want nil", err)
+	}
+
+	// Act
+	pool.Start(context.Background())
+	pool.Start(context.Background()) // idempotent path
+
+	// Assert
+	if !pool.IsRunning() {
+		t.Fatal("pool should be running after Start()")
+	}
+
+	// Act
+	pool.Stop()
+}
+
+// TestGlobalThreadPool_InitIdempotentAndPanicWhenMissing verifies accessor panic without initialization
+// Given: A shutdown global pool state
+// When: GetGlobalThreadPool is called without InitGlobalThreadPool
+// Then: The accessor panics to signal missing initialization
+func TestGlobalThreadPool_InitIdempotentAndPanicWhenMissing(t *testing.T) {
+	// Arrange
+	ShutdownGlobalThreadPool()
+
+	// Act and Assert
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("GetGlobalThreadPool() should panic when not initialized")
+		}
+	}()
+	_ = GetGlobalThreadPool()
+}
+
+// TestGlobalThreadPool_InitIdempotent verifies repeated global initialization keeps one instance
+// Given: A clean global pool state
+// When: InitGlobalThreadPool is called multiple times
+// Then: The same pool instance is retained
+func TestGlobalThreadPool_InitIdempotent(t *testing.T) {
+	// Arrange
+	ShutdownGlobalThreadPool()
+	defer ShutdownGlobalThreadPool()
+
+	// Act
+	InitGlobalThreadPool(1)
+	p1 := GetGlobalThreadPool()
+	InitGlobalThreadPool(4) // should be no-op
+	p2 := GetGlobalThreadPool()
+
+	// Assert
+	if p1 != p2 {
+		t.Fatal("InitGlobalThreadPool should be idempotent and keep same instance")
+	}
+}
+
+// TestGoroutineThreadPool_PanicHandlerAndMetrics verifies panic hooks and metrics integration
+// Given: A pool configured with custom panic handler and metrics
+// When: A task panics and a follow-up task runs
+// Then: Panic handler/metrics are invoked and worker continues processing
+func TestGoroutineThreadPool_PanicHandlerAndMetrics(t *testing.T) {
+	// Arrange
+	panicHandler := &poolTestPanicHandler{}
+	metrics := &poolTestMetrics{}
+	cfg := &core.TaskSchedulerConfig{
+		PanicHandler:        panicHandler,
+		Metrics:             metrics,
+		RejectedTaskHandler: &core.DefaultRejectedTaskHandler{},
+	}
+	pool := NewGoroutineThreadPoolWithConfig("panic-metrics-pool", 1, cfg)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	done := make(chan struct{}, 1)
+	pool.PostInternal(func(ctx context.Context) {
+		panic(fmt.Errorf("boom"))
+	}, core.DefaultTaskTraits())
+	pool.PostInternal(func(ctx context.Context) {
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	}, core.DefaultTaskTraits())
+
+	// Assert
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for post-panic task")
+	}
+
+	// Assert
+	if !panicHandler.called.Load() {
+		t.Fatal("custom panic handler was not called")
+	}
+	if metrics.panicCount.Load() == 0 {
+		t.Fatal("panic metrics were not recorded")
 	}
 }
 

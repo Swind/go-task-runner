@@ -63,16 +63,20 @@ func (h *TestPanicHandler) CallCount() int {
 	return len(h.calls)
 }
 
+// TestDefaultPanicHandler verifies default panic handler is safe to invoke
+// Given: A DefaultPanicHandler instance
+// When: HandlePanic is called for worker and non-worker paths
+// Then: Calls complete without panicking
 func TestDefaultPanicHandler(t *testing.T) {
-	// Given: A DefaultPanicHandler
+	// Arrange
 	handler := &DefaultPanicHandler{}
 
-	// When: HandlePanic is called
+	// Act
 	ctx := context.Background()
 	handler.HandlePanic(ctx, "test-runner", 42, "test panic", []byte("stack trace"))
 
-	// Then: No panic should occur (handler should not crash)
-	// This is just a sanity test to ensure the handler works
+	// Also cover non-worker path (workerID < 0)
+	handler.HandlePanic(ctx, "test-runner", -1, "test panic", []byte("stack trace"))
 }
 
 // =============================================================================
@@ -212,32 +216,37 @@ func (m *TestMetrics) Clear() {
 	m.taskRejections = make([]TaskRejectionMetric, 0)
 }
 
+// TestNilMetrics verifies nil metrics collector is a no-op implementation
+// Given: A NilMetrics instance
+// When: All metric recording methods are called
+// Then: Calls complete without panicking
 func TestNilMetrics(t *testing.T) {
-	// Given: A NilMetrics
+	// Arrange
 	metrics := &NilMetrics{}
 
-	// When: All methods are called
+	// Act
 	metrics.RecordTaskDuration("test-runner", TaskPriorityUserVisible, time.Second)
 	metrics.RecordTaskPanic("test-runner", "panic")
 	metrics.RecordQueueDepth("test-runner", 10)
 	metrics.RecordTaskRejected("test-runner", "shutdown")
-
-	// Then: No panic should occur (all methods are no-ops)
-	// This is just a sanity test to ensure the no-op implementation works
 }
 
+// TestTestMetrics verifies test metrics collector stores all metric categories
+// Given: A TestMetrics collector
+// When: Duration, panic, queue depth, and rejection metrics are recorded
+// Then: Recorded metric counts and payload fields match expected values
 func TestTestMetrics(t *testing.T) {
-	// Given: A TestMetrics
+	// Arrange
 	metrics := NewTestMetrics()
 
-	// When: Metrics are recorded
+	// Act
 	metrics.RecordTaskDuration("runner1", TaskPriorityUserBlocking, 100*time.Millisecond)
 	metrics.RecordTaskDuration("runner1", TaskPriorityBestEffort, 200*time.Millisecond)
 	metrics.RecordTaskPanic("runner2", "test panic")
 	metrics.RecordQueueDepth("runner1", 5)
 	metrics.RecordTaskRejected("runner3", "backpressure")
 
-	// Then: Metrics should be recorded correctly
+	// Assert
 	if len(metrics.GetTaskDurations()) != 2 {
 		t.Errorf("Expected 2 task durations, got %d", len(metrics.GetTaskDurations()))
 	}
@@ -254,7 +263,7 @@ func TestTestMetrics(t *testing.T) {
 		t.Errorf("Expected 1 task rejection, got %d", len(metrics.GetTaskRejections()))
 	}
 
-	// Verify values
+	// Assert
 	durations := metrics.GetTaskDurations()
 	if durations[0].RunnerName != "runner1" || durations[0].Duration != 100*time.Millisecond {
 		t.Errorf("Unexpected first duration: %+v", durations[0])
@@ -320,27 +329,32 @@ func (h *TestRejectedTaskHandler) Count() int {
 	return len(h.rejections)
 }
 
+// TestDefaultRejectedTaskHandler verifies default rejected-task handler is safe to invoke
+// Given: A DefaultRejectedTaskHandler instance
+// When: HandleRejectedTask is called
+// Then: Call completes without panicking
 func TestDefaultRejectedTaskHandler(t *testing.T) {
-	// Given: A DefaultRejectedTaskHandler
+	// Arrange
 	handler := &DefaultRejectedTaskHandler{}
 
-	// When: HandleRejectedTask is called
+	// Act
 	handler.HandleRejectedTask("test-runner", "shutdown")
-
-	// Then: No panic should occur (handler should not crash)
-	// This is just a sanity test to ensure the handler works
 }
 
+// TestTestRejectedTaskHandler verifies rejected-task records are captured in order
+// Given: A TestRejectedTaskHandler collector
+// When: Multiple rejections are reported
+// Then: Count and stored rejection payloads match expected values
 func TestTestRejectedTaskHandler(t *testing.T) {
-	// Given: A TestRejectedTaskHandler
+	// Arrange
 	handler := NewTestRejectedTaskHandler()
 
-	// When: Tasks are rejected
+	// Act
 	handler.HandleRejectedTask("runner1", "shutdown")
 	handler.HandleRejectedTask("runner2", "backpressure")
 	handler.HandleRejectedTask("runner1", "queue full")
 
-	// Then: Rejections should be recorded correctly
+	// Assert
 	if handler.Count() != 3 {
 		t.Errorf("Expected 3 rejections, got %d", handler.Count())
 	}
@@ -359,11 +373,15 @@ func TestTestRejectedTaskHandler(t *testing.T) {
 // Test TaskSchedulerConfig
 // =============================================================================
 
+// TestDefaultTaskSchedulerConfig verifies default scheduler config wires default handlers
+// Given: No explicit scheduler config input
+// When: DefaultTaskSchedulerConfig is called
+// Then: Panic handler, metrics, and rejected-task handler are non-nil defaults
 func TestDefaultTaskSchedulerConfig(t *testing.T) {
-	// Given: Default config
+	// Act
 	config := DefaultTaskSchedulerConfig()
 
-	// Then: All handlers should be non-nil
+	// Assert
 	if config.PanicHandler == nil {
 		t.Error("PanicHandler should not be nil")
 	}
@@ -374,7 +392,7 @@ func TestDefaultTaskSchedulerConfig(t *testing.T) {
 		t.Error("RejectedTaskHandler should not be nil")
 	}
 
-	// Verify types
+	// Assert
 	if _, ok := config.PanicHandler.(*DefaultPanicHandler); !ok {
 		t.Errorf("PanicHandler should be *DefaultPanicHandler, got %T", config.PanicHandler)
 	}
@@ -386,19 +404,24 @@ func TestDefaultTaskSchedulerConfig(t *testing.T) {
 	}
 }
 
+// TestTaskSchedulerConfig_CustomHandlers verifies custom handlers are preserved in config
+// Given: Explicit custom panic, metrics, and rejected-task handlers
+// When: TaskSchedulerConfig is constructed with those handlers
+// Then: Config fields reference the exact provided instances
 func TestTaskSchedulerConfig_CustomHandlers(t *testing.T) {
-	// Given: Custom handlers
+	// Arrange
 	panicHandler := NewTestPanicHandler()
 	metrics := NewTestMetrics()
 	rejectedHandler := NewTestRejectedTaskHandler()
 
+	// Act
 	config := &TaskSchedulerConfig{
 		PanicHandler:        panicHandler,
 		Metrics:             metrics,
 		RejectedTaskHandler: rejectedHandler,
 	}
 
-	// Then: Handlers should be set correctly
+	// Assert
 	if config.PanicHandler != panicHandler {
 		t.Error("PanicHandler not set correctly")
 	}
@@ -410,14 +433,20 @@ func TestTaskSchedulerConfig_CustomHandlers(t *testing.T) {
 	}
 }
 
+// TestTaskSchedulerConfig_PartialConfig verifies partial config keeps unspecified handlers nil
+// Given: A config with only Metrics set
+// When: The config is inspected
+// Then: Metrics is preserved while other handler fields remain nil
 func TestTaskSchedulerConfig_PartialConfig(t *testing.T) {
-	// Given: Partial config (only Metrics set)
+	// Arrange
 	metrics := NewTestMetrics()
+
+	// Act
 	config := &TaskSchedulerConfig{
 		Metrics: metrics,
 	}
 
-	// Then: Only Metrics should be non-nil
+	// Assert
 	if config.PanicHandler != nil {
 		t.Error("PanicHandler should be nil")
 	}
@@ -433,8 +462,12 @@ func TestTaskSchedulerConfig_PartialConfig(t *testing.T) {
 // Integration Test: TaskScheduler with custom handlers
 // =============================================================================
 
+// TestTaskScheduler_WithCustomHandlers verifies scheduler accepts tasks with custom handler config
+// Given: A scheduler configured with custom panic, metrics, and reject handlers
+// When: A task is posted into the scheduler
+// Then: Task is accepted and queued
 func TestTaskScheduler_WithCustomHandlers(t *testing.T) {
-	// Given: A scheduler with custom handlers
+	// Arrange
 	panicHandler := NewTestPanicHandler()
 	metrics := NewTestMetrics()
 	rejectedHandler := NewTestRejectedTaskHandler()
@@ -448,13 +481,13 @@ func TestTaskScheduler_WithCustomHandlers(t *testing.T) {
 	scheduler := NewFIFOTaskSchedulerWithConfig(2, config)
 	defer scheduler.Shutdown()
 
-	// When: Tasks are posted to the scheduler
+	// Act
 	taskExecuted := make(chan struct{})
 	scheduler.PostInternal(func(_ context.Context) {
 		close(taskExecuted)
 	}, DefaultTaskTraits())
 
-	// Then: Task should be queued
+	// Assert
 	if scheduler.QueuedTaskCount() != 1 {
 		t.Errorf("Expected 1 queued task, got %d", scheduler.QueuedTaskCount())
 	}
@@ -463,8 +496,12 @@ func TestTaskScheduler_WithCustomHandlers(t *testing.T) {
 	// This test just verifies the scheduler accepts tasks and queues them.
 }
 
+// TestTaskScheduler_RejectedTask verifies rejection handlers are invoked after shutdown
+// Given: A scheduler with metrics and rejected-task handlers
+// When: Scheduler is shut down and a task is posted
+// Then: Rejection metrics and handler records are produced with shutdown reason
 func TestTaskScheduler_RejectedTask(t *testing.T) {
-	// Given: A scheduler with custom handlers
+	// Arrange
 	metrics := NewTestMetrics()
 	rejectedHandler := NewTestRejectedTaskHandler()
 
@@ -473,17 +510,18 @@ func TestTaskScheduler_RejectedTask(t *testing.T) {
 		RejectedTaskHandler: rejectedHandler,
 	}
 
+	// Arrange
 	scheduler := NewFIFOTaskSchedulerWithConfig(2, config)
 
-	// When: Scheduler is shut down
+	// Act
 	scheduler.Shutdown()
 
-	// And: A task is posted after shutdown
+	// Act
 	scheduler.PostInternal(func(_ context.Context) {
 		t.Error("Task should not be executed after shutdown")
 	}, DefaultTaskTraits())
 
-	// Then: Rejection handlers should be called
+	// Assert
 	if len(metrics.GetTaskRejections()) == 0 {
 		t.Error("Expected at least 1 task rejection")
 	}
@@ -501,8 +539,12 @@ func TestTaskScheduler_RejectedTask(t *testing.T) {
 	}
 }
 
+// TestTaskScheduler_PanicHandling verifies non-executed queued panic task does not trigger panic hooks
+// Given: A scheduler configured with panic handler and metrics but no workers consuming tasks
+// When: A panicing task is posted
+// Then: Task is queued and no panic hooks are recorded
 func TestTaskScheduler_PanicHandling(t *testing.T) {
-	// Given: A scheduler with custom handlers
+	// Arrange
 	panicHandler := NewTestPanicHandler()
 	metrics := NewTestMetrics()
 
@@ -514,7 +556,7 @@ func TestTaskScheduler_PanicHandling(t *testing.T) {
 	scheduler := NewFIFOTaskSchedulerWithConfig(2, config)
 	defer scheduler.Shutdown()
 
-	// When: A task that panics is posted
+	// Act
 	taskDone := make(chan struct{})
 	scheduler.PostInternal(func(_ context.Context) {
 		defer close(taskDone)
@@ -533,7 +575,7 @@ func TestTaskScheduler_PanicHandling(t *testing.T) {
 		t.Logf("Task queued: %d (expected 1)", scheduler.QueuedTaskCount())
 	}
 
-	// Then: No panics should be recorded yet (task not executed without workers)
+	// Assert
 	if panicHandler.CallCount() != 0 {
 		t.Errorf("Expected 0 panic calls (task not executed without workers), got %d", panicHandler.CallCount())
 	}

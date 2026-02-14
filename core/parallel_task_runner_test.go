@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	taskrunner "github.com/Swind/go-task-runner"
 	core "github.com/Swind/go-task-runner/core"
 )
 
@@ -31,6 +32,45 @@ func (p *testThreadPool) QueuedTaskCount() int      { return 0 }
 func (p *testThreadPool) ActiveTaskCount() int      { return 0 }
 func (p *testThreadPool) DelayedTaskCount() int     { return 0 }
 
+type delayedCountThreadPool struct {
+	delayedCalls atomic.Int32
+}
+
+func (p *delayedCountThreadPool) PostInternal(task core.Task, traits core.TaskTraits) {
+	task(context.Background())
+}
+func (p *delayedCountThreadPool) PostDelayedInternal(task core.Task, delay time.Duration, traits core.TaskTraits, target core.TaskRunner) {
+	p.delayedCalls.Add(1)
+}
+func (p *delayedCountThreadPool) Start(ctx context.Context) {}
+func (p *delayedCountThreadPool) Stop()                     {}
+func (p *delayedCountThreadPool) ID() string                { return "delayed-count" }
+func (p *delayedCountThreadPool) IsRunning() bool           { return true }
+func (p *delayedCountThreadPool) WorkerCount() int          { return 1 }
+func (p *delayedCountThreadPool) QueuedTaskCount() int      { return 0 }
+func (p *delayedCountThreadPool) ActiveTaskCount() int      { return 0 }
+func (p *delayedCountThreadPool) DelayedTaskCount() int     { return 0 }
+
+type testPanicHandler struct {
+	called atomic.Bool
+}
+
+func (h *testPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
+	h.called.Store(true)
+}
+
+type testMetrics struct {
+	panicCount atomic.Int32
+}
+
+func (m *testMetrics) RecordTaskDuration(runnerName string, priority core.TaskPriority, duration time.Duration) {
+}
+func (m *testMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
+	m.panicCount.Add(1)
+}
+func (m *testMetrics) RecordQueueDepth(runnerName string, depth int)       {}
+func (m *testMetrics) RecordTaskRejected(runnerName string, reason string) {}
+
 // TestParallelTaskRunner_Constructor verifies runner initialization
 // Given: A thread pool and maxConcurrency of 4
 // When: NewParallelTaskRunner is called
@@ -52,6 +92,259 @@ func TestParallelTaskRunner_Constructor(t *testing.T) {
 	}
 	if runner.IsClosed() {
 		t.Error("New runner should not be closed")
+	}
+}
+
+// TestParallelTaskRunner_MetadataAndThreadPoolAccess verifies metadata APIs and thread pool accessor
+// Given: A new parallel runner over a known test pool
+// When: Name/metadata are set and then queried
+// Then: Accessors return expected values and metadata returns a defensive copy
+func TestParallelTaskRunner_MetadataAndThreadPoolAccess(t *testing.T) {
+	// Arrange
+	pool := &testThreadPool{}
+	runner := core.NewParallelTaskRunner(pool, 2)
+
+	// Act
+	runner.SetName("parallel-runner")
+	runner.SetMetadata("component", "worker")
+	runner.SetMetadata("index", 1)
+
+	// Assert
+	if got := runner.Name(); got != "parallel-runner" {
+		t.Fatalf("Name() = %q, want %q", got, "parallel-runner")
+	}
+
+	// Act
+	meta := runner.Metadata()
+
+	// Assert
+	if meta["component"] != "worker" || meta["index"] != 1 {
+		t.Fatalf("Metadata() = %#v, want component/index entries", meta)
+	}
+	meta["component"] = "mutated"
+	if runner.Metadata()["component"] != "worker" {
+		t.Fatal("Metadata() should return a copy")
+	}
+
+	if got := runner.GetThreadPool(); got != pool {
+		t.Fatal("GetThreadPool() returned unexpected pool")
+	}
+}
+
+// TestParallelTaskRunner_WaitShutdown verifies waiter unblocks after shutdown
+// Given: A running parallel runner
+// When: WaitShutdown is called and runner is shut down
+// Then: WaitShutdown returns nil before timeout
+func TestParallelTaskRunner_WaitShutdown(t *testing.T) {
+	// Arrange
+	pool := &executingTestThreadPool{maxWorkers: 1}
+	runner := core.NewParallelTaskRunner(pool, 1)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	done := make(chan error, 1)
+	go func() {
+		done <- runner.WaitShutdown(context.Background())
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	runner.Shutdown()
+
+	// Assert
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("WaitShutdown() error = %v, want nil", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("WaitShutdown() timed out")
+	}
+}
+
+// TestParallelTaskRunner_PostTaskAndReplyWithTraits verifies reply runs after task with specified traits
+// Given: A running parallel runner
+// When: PostTaskAndReplyWithTraits is invoked
+// Then: Task executes and reply callback is triggered afterward
+func TestParallelTaskRunner_PostTaskAndReplyWithTraits(t *testing.T) {
+	// Arrange
+	pool := &executingTestThreadPool{maxWorkers: 1}
+	runner := core.NewParallelTaskRunner(pool, 1)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	var taskRan atomic.Bool
+	replyDone := make(chan struct{}, 1)
+
+	// Act
+	runner.PostTaskAndReplyWithTraits(
+		func(ctx context.Context) {
+			taskRan.Store(true)
+		},
+		core.TraitsBestEffort(),
+		func(ctx context.Context) {
+			select {
+			case replyDone <- struct{}{}:
+			default:
+			}
+		},
+		core.TraitsUserBlocking(),
+		runner,
+	)
+
+	// Assert
+	select {
+	case <-replyDone:
+	case <-time.After(1 * time.Second):
+		t.Fatal("reply did not execute")
+	}
+
+	// Assert
+	if !taskRan.Load() {
+		t.Fatal("task did not execute before reply")
+	}
+}
+
+// TestParallelTaskRunner_PostDelayedTaskWithTraits_ClosedRunner verifies delayed posting is blocked after shutdown
+// Given: A closed parallel runner
+// When: PostDelayedTaskWithTraits is called
+// Then: Thread pool delayed-post API is not invoked
+func TestParallelTaskRunner_PostDelayedTaskWithTraits_ClosedRunner(t *testing.T) {
+	// Arrange
+	pool := &delayedCountThreadPool{}
+	runner := core.NewParallelTaskRunner(pool, 1)
+
+	// Act
+	runner.Shutdown()
+	runner.PostDelayedTaskWithTraits(func(ctx context.Context) {}, 10*time.Millisecond, core.DefaultTaskTraits())
+
+	// Assert
+	if got := pool.delayedCalls.Load(); got != 0 {
+		t.Fatalf("PostDelayedInternal calls = %d, want 0 for closed runner", got)
+	}
+}
+
+// TestParallelTaskRunner_WaitIdle_ClosedAndContextPaths verifies error paths for WaitIdle
+// Given: A closed runner and another runner with long-running task
+// When: WaitIdle is called on closed runner and with a timed-out context
+// Then: Both calls return an error
+func TestParallelTaskRunner_WaitIdle_ClosedAndContextPaths(t *testing.T) {
+	// Arrange
+	pool := &executingTestThreadPool{maxWorkers: 1}
+	runner := core.NewParallelTaskRunner(pool, 1)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act and Assert
+	runner.Shutdown()
+	if err := runner.WaitIdle(context.Background()); err == nil {
+		t.Fatal("WaitIdle() on closed runner should return error")
+	}
+
+	// Arrange
+	runner2 := core.NewParallelTaskRunner(pool, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	// Act
+	runner2.PostTask(func(ctx context.Context) { time.Sleep(100 * time.Millisecond) })
+
+	// Assert
+	if err := runner2.WaitIdle(ctx); err == nil {
+		t.Fatal("WaitIdle() with timed-out context should return error")
+	}
+}
+
+// TestParallelTaskRunner_WaitShutdown_ContextCancel verifies WaitShutdown respects context cancellation
+// Given: A running parallel runner
+// When: WaitShutdown is called with a short timeout context
+// Then: WaitShutdown returns a context-related error
+func TestParallelTaskRunner_WaitShutdown_ContextCancel(t *testing.T) {
+	// Arrange
+	pool := &executingTestThreadPool{maxWorkers: 1}
+	runner := core.NewParallelTaskRunner(pool, 1)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	// Assert
+	if err := runner.WaitShutdown(ctx); err == nil {
+		t.Fatal("WaitShutdown() should return context error on timeout")
+	}
+}
+
+// TestParallelTaskRunner_FlushAsync_NilAndClosed verifies flush behavior for nil callback and closed runner
+// Given: A running runner that is later shut down
+// When: FlushAsync is called with nil and then with callback after shutdown
+// Then: Nil callback is no-op and closed runner does not execute callback
+func TestParallelTaskRunner_FlushAsync_NilAndClosed(t *testing.T) {
+	// Arrange
+	pool := &executingTestThreadPool{maxWorkers: 1}
+	runner := core.NewParallelTaskRunner(pool, 1)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	runner.FlushAsync(nil)
+
+	// Act
+	runner.Shutdown()
+	called := atomic.Bool{}
+	runner.FlushAsync(func() { called.Store(true) })
+	time.Sleep(50 * time.Millisecond)
+
+	// Assert
+	if called.Load() {
+		t.Fatal("FlushAsync callback should not run on closed runner")
+	}
+}
+
+// TestParallelTaskRunner_RunLoop_UsesSchedulerHandlers verifies panic handler and metrics integration
+// Given: A parallel runner using a pool with custom scheduler hooks
+// When: A panic task runs before a normal task
+// Then: Panic is reported and normal task still executes
+func TestParallelTaskRunner_RunLoop_UsesSchedulerHandlers(t *testing.T) {
+	// Arrange
+	handler := &testPanicHandler{}
+	metrics := &testMetrics{}
+	cfg := &core.TaskSchedulerConfig{
+		PanicHandler:        handler,
+		Metrics:             metrics,
+		RejectedTaskHandler: &core.DefaultRejectedTaskHandler{},
+	}
+
+	pool := taskrunner.NewGoroutineThreadPoolWithConfig("parallel-handler-pool", 1, cfg)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	runner := core.NewParallelTaskRunner(pool, 1)
+
+	done := make(chan struct{}, 1)
+	runner.PostTask(func(ctx context.Context) { panic("boom") })
+	runner.PostTask(func(ctx context.Context) {
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	})
+
+	// Assert
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("runner did not continue after panic task")
+	}
+
+	// Assert
+	if !handler.called.Load() {
+		t.Fatal("custom panic handler was not called")
+	}
+	if metrics.panicCount.Load() == 0 {
+		t.Fatal("panic metric was not recorded")
 	}
 }
 

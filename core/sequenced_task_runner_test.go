@@ -143,6 +143,52 @@ func TestSequencedTaskRunner_Shutdown_PreventsNewTasks(t *testing.T) {
 	}
 }
 
+// TestSequencedTaskRunner_RunLoop_UsesSchedulerHandlers verifies panic handler and metrics are wired through runLoop
+// Given: A sequenced runner using a pool with custom scheduler handlers
+// When: A panic task is followed by a normal task
+// Then: Panic is reported and subsequent tasks still execute
+func TestSequencedTaskRunner_RunLoop_UsesSchedulerHandlers(t *testing.T) {
+	// Arrange
+	handler := &testPanicHandler{}
+	metrics := &testMetrics{}
+	cfg := &core.TaskSchedulerConfig{
+		PanicHandler:        handler,
+		Metrics:             metrics,
+		RejectedTaskHandler: &core.DefaultRejectedTaskHandler{},
+	}
+
+	pool := taskrunner.NewGoroutineThreadPoolWithConfig("sequenced-handler-pool", 1, cfg)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	// Act
+	runner := core.NewSequencedTaskRunner(pool)
+	done := make(chan struct{}, 1)
+
+	runner.PostTask(func(ctx context.Context) { panic("boom") })
+	runner.PostTask(func(ctx context.Context) {
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	})
+
+	// Assert
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("runner did not continue after panic task")
+	}
+
+	// Assert
+	if !handler.called.Load() {
+		t.Fatal("custom panic handler was not called")
+	}
+	if metrics.panicCount.Load() == 0 {
+		t.Fatal("panic metric was not recorded")
+	}
+}
+
 // TestSequencedTaskRunner_Shutdown_ClearsPendingQueue verifies shutdown clears pending tasks
 // Given: A SequencedTaskRunner with 2 queued tasks
 // When: Shutdown is called before any execution
