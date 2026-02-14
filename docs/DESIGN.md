@@ -1,8 +1,14 @@
 Chromium-Inspired Threading Architecture in Golang - Design & Implementation Guide (v2.2)
 
 This document details the design and implementation of a production-grade task scheduling system in Golang, architecturally referenced from Chromium's base::TaskScheduler.
+For the current JobManager-specific design (durable-ack, pluggable persistence), see [JOB_MANAGER.md](JOB_MANAGER.md).
 
 ## Version History & Design Evolution
+
+v2.3 Updates (JobManager Durability & Persistence):
+- Durable-ack semantics: `SubmitJob` returns success only after persistence is confirmed.
+- Persistence extensibility: added optional `DurableJobStore` (`CreateJob`) for atomic create semantics.
+- Compatibility mode: stores that only implement `JobStore` still work via legacy fallback path.
 
 v2.2 Updates (Control Plane & Reliability):
 - Control Plane: Enhanced JobManager with management capabilities: Query, Cancel, and Schedule.

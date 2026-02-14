@@ -36,6 +36,7 @@ The core concepts derived from Chromium are:
 -   **Repeating Tasks**: Execute tasks repeatedly at fixed intervals with easy stop control.
 -   **Task and Reply Pattern**: Execute task on one runner, reply on another with type-safe return values.
 -   **Task Traits**: Priority-aware task scheduling.
+-   **JobManager (core package)**: Three-layer execution model with durable-ack submission and pluggable persistence.
 
 ## Installation
 
@@ -235,6 +236,57 @@ Gracefully shutdown a runner to stop all tasks:
 
 See [examples/shutdown](examples/shutdown/main.go) for more examples.
 
+### 6. JobManager (Durable Ack + Pluggable Store)
+
+`JobManager` is implemented in the `core` package for durable job workflows.
+
+```go
+import (
+    "context"
+
+    taskrunner "github.com/Swind/go-task-runner"
+    "github.com/Swind/go-task-runner/core"
+)
+
+func setupJobManager() *core.JobManager {
+    controlRunner := taskrunner.NewSequencedTaskRunner(taskrunner.GlobalThreadPool())
+    ioRunner := taskrunner.NewSequencedTaskRunner(taskrunner.GlobalThreadPool())
+    executionRunner := taskrunner.NewParallelTaskRunner(taskrunner.GlobalThreadPool(), 4)
+
+    // Default in-memory implementation supports DurableJobStore.CreateJob.
+    store := core.NewMemoryJobStore()
+    serializer := core.NewJSONSerializer()
+
+    return core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+}
+
+func submit(ctx context.Context, jm *core.JobManager) error {
+    if err := core.RegisterHandler(jm, "send_email", func(ctx context.Context, args struct {
+        To      string `json:"to"`
+        Subject string `json:"subject"`
+    }) error {
+        return nil
+    }); err != nil {
+        return err
+    }
+
+    return jm.SubmitJob(ctx, "job-1", "send_email", struct {
+        To      string `json:"to"`
+        Subject string `json:"subject"`
+    }{
+        To:      "user@example.com",
+        Subject: "Hello",
+    }, taskrunner.DefaultTaskTraits())
+}
+```
+
+Key behavior:
+- `SubmitJob` is durable-ack: it returns success only after persistence confirms durability.
+- If the store implements `DurableJobStore`, JobManager uses `CreateJob` for atomic create semantics.
+- Otherwise, JobManager falls back to compatibility mode (`GetJob` + `SaveJob`).
+
+See [docs/JOB_MANAGER.md](docs/JOB_MANAGER.md) for architecture details.
+
 ## Example Programs
 
 - [examples/basic_sequence](examples/basic_sequence/main.go): basic sequenced execution and delayed task.
@@ -251,6 +303,7 @@ See [examples/shutdown](examples/shutdown/main.go) for more examples.
 ## Architecture
 
 See [DESIGN.md](docs/DESIGN.md) for a deep dive into the internal architecture, including how the `TaskScheduler`, `DelayManager`, and `TaskQueue` interact.
+For JobManager specifics, see [JOB_MANAGER.md](docs/JOB_MANAGER.md).
 
 ## License
 
