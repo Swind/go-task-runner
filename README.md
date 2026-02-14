@@ -1,11 +1,12 @@
 # Go Task Runner
 
 [![CI](https://github.com/Swind/go-task-runner/workflows/CI/badge.svg)](https://github.com/Swind/go-task-runner/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/badge/coverage-??%25-brightgreen?logo=go&link=https://github.com/Swind/go-task-runner)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Swind/go-task-runner)](https://goreportcard.com/report/github.com/Swind/go-task-runner)
 ![Go Version](https://img.shields.io/badge/Go-1.24%2B-%2300ADD8?logo=go)
 [![License](https://img.shields.io/github/license/Swind/go-task-runner)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Swind/go-task-runner)](https://github.com/Swind/go-task-runner/releases/latest)
+
+[繁體中文 README](README.zh-TW.md)
 
 ### ⚠️ **Disclaimer: Experimental / Educational Use Only**
 
@@ -44,6 +45,8 @@ go get github.com/Swind/go-task-runner
 
 ## Usage
 
+Note: The snippets below focus on specific APIs. For complete runnable programs, see `examples/*`.
+
 ### 1. Initialize the Global Thread Pool
 
 ```go
@@ -51,7 +54,6 @@ package main
 
 import (
     "context"
-    "time"
 
     taskrunner "github.com/Swind/go-task-runner"
 )
@@ -141,7 +143,14 @@ The `PostTaskAndReply` pattern allows you to execute a task on one runner, then 
 
 **With Return Values (Generic):**
 
-Use `PostTaskAndReplyWithResult` to pass data from task to reply:
+Use `PostTaskAndReplyWithResult` to pass data from task to reply.
+This helper currently lives in the `core` package, so import:
+
+```go
+import "github.com/Swind/go-task-runner/core"
+```
+
+Then call:
 
 ```go
     core.PostTaskAndReplyWithResult(
@@ -188,12 +197,13 @@ Execute tasks repeatedly at fixed intervals:
     defer handle.Stop()
 
     // With initial delay
-    handle := runner.PostRepeatingTaskWithInitialDelay(
+    handle2 := runner.PostRepeatingTaskWithInitialDelay(
         task,
         2*time.Second,  // Start after 2 seconds
         1*time.Second,  // Then repeat every second
         taskrunner.DefaultTaskTraits(),
     )
+    defer handle2.Stop()
 ```
 
 See [examples/repeating_task](examples/repeating_task/main.go) for more examples.
