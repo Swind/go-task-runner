@@ -9,6 +9,13 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 ## Overview
 golangci-lint aggregates multiple Go linters. This skill provides common issues and fixes.
 
+## When to Use This Skill
+
+Use this skill when:
+- The user asks to run/fix lint issues in Go code
+- CI fails on golangci-lint checks
+- You need to align local lint behavior with this repository's CI lint scope
+
 ## Running the Linter
 ```bash
 # Run all linters

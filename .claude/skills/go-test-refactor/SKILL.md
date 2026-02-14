@@ -12,11 +12,12 @@ Professional Golang test code refactoring skill that transforms existing tests i
 ## When to Use This Skill
 Claude should automatically apply this skill when:
 - User asks to "refactor", "improve", or "review" Go test files
-- User mentions "add comments to tests" or "document tests"
 - User asks to "fix flaky tests" or "remove time.Sleep"
 - User requests "clean up test code" or "make tests more readable"
 - Working with files ending in `_test.go` and the user asks for test quality improvements
 - User mentions "AAA pattern", "BDD", or "test structure"
+
+When the request is primarily documentation/comment style updates, prefer `go-test-doc`.
 
 ## Core Refactoring Standards
 

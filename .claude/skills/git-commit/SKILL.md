@@ -1,5 +1,5 @@
 ---
-name: Git Commit
+name: git-commit
 description: Generates storytelling-focused Conventional Commits messages with optional Jira context, then commits changes. Push is optional and only when explicitly requested.
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git add:*), Bash(git branch:*), Bash(git log:*), AskUserQuestion, mcp__zapier__jira_software_cloud_find_issue_by_key
 license: MIT

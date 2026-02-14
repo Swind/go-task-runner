@@ -1,6 +1,7 @@
 ---
 name: go-test-doc
 description: Add clear documentation to Go tests with BDD-style (Given-When-Then) comments and AAA organization when readability benefits.
+tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 # Go Test Documentation Expert
@@ -15,7 +16,10 @@ I'll use this Skill when you:
 - Request to "improve readability" or "explain" tests
 - Want to "organize" or "structure" test code
 - Say "make tests clearer" or "add test descriptions"
-- Work with `*_test.go` files and need documentation improvements
+- Work with `*_test.go` files and explicitly need documentation/comment improvements
+
+If the main request is test behavior refactoring (flakiness, synchronization, structure changes),
+prefer `go-test-refactor` instead.
 
 ## Core Documentation Standards
 
