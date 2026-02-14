@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -66,6 +67,15 @@ type JobStore interface {
 	DeleteJob(ctx context.Context, id string) error
 }
 
+// ErrJobAlreadyExists indicates the job ID already exists in persistent storage.
+var ErrJobAlreadyExists = errors.New("job already exists")
+
+// DurableJobStore provides atomic create semantics for durable-ack submission.
+// Implement this interface to guarantee CreateJob fails when a job ID already exists.
+type DurableJobStore interface {
+	CreateJob(ctx context.Context, job *JobEntity) error
+}
+
 // =============================================================================
 // MemoryJobStore Implementation
 // =============================================================================
@@ -81,6 +91,39 @@ func NewMemoryJobStore() *MemoryJobStore {
 	return &MemoryJobStore{}
 }
 
+func cloneJobEntity(job *JobEntity) *JobEntity {
+	return &JobEntity{
+		ID:        job.ID,
+		Type:      job.Type,
+		ArgsData:  append([]byte(nil), job.ArgsData...),
+		Status:    job.Status,
+		Result:    job.Result,
+		Priority:  job.Priority,
+		CreatedAt: job.CreatedAt,
+		UpdatedAt: job.UpdatedAt,
+	}
+}
+
+// CreateJob inserts a new job atomically.
+// Returns ErrJobAlreadyExists if the ID already exists.
+func (s *MemoryJobStore) CreateJob(ctx context.Context, job *JobEntity) error {
+	if job.ID == "" {
+		return fmt.Errorf("job ID cannot be empty")
+	}
+
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = time.Now()
+	}
+	job.UpdatedAt = time.Now()
+
+	jobCopy := cloneJobEntity(job)
+	if _, loaded := s.data.LoadOrStore(job.ID, jobCopy); loaded {
+		return ErrJobAlreadyExists
+	}
+
+	return nil
+}
+
 func (s *MemoryJobStore) SaveJob(ctx context.Context, job *JobEntity) error {
 	if job.ID == "" {
 		return fmt.Errorf("job ID cannot be empty")
@@ -93,16 +136,7 @@ func (s *MemoryJobStore) SaveJob(ctx context.Context, job *JobEntity) error {
 	job.UpdatedAt = time.Now()
 
 	// Create a copy to avoid external modifications
-	jobCopy := &JobEntity{
-		ID:        job.ID,
-		Type:      job.Type,
-		ArgsData:  append([]byte(nil), job.ArgsData...),
-		Status:    job.Status,
-		Result:    job.Result,
-		Priority:  job.Priority,
-		CreatedAt: job.CreatedAt,
-		UpdatedAt: job.UpdatedAt,
-	}
+	jobCopy := cloneJobEntity(job)
 
 	s.data.Store(job.ID, jobCopy)
 	return nil

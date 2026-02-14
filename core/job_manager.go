@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,13 @@ type JobManager struct {
 	errorHandler ErrorHandler
 
 	closed atomic.Bool
+	cfgMu  sync.RWMutex
+}
+
+type runtimeConfigSnapshot struct {
+	retryPolicy  RetryPolicy
+	logger       Logger
+	errorHandler ErrorHandler
 }
 
 // activeJobInfo tracks information about an active job
@@ -79,22 +87,56 @@ func NewJobManager(
 
 // SetRetryPolicy sets the retry policy for IO operations
 func (m *JobManager) SetRetryPolicy(policy RetryPolicy) {
+	m.cfgMu.Lock()
+	defer m.cfgMu.Unlock()
 	m.retryPolicy = policy
 }
 
 // GetRetryPolicy returns the current retry policy
 func (m *JobManager) GetRetryPolicy() RetryPolicy {
-	return m.retryPolicy
+	return m.getRetryPolicyLocked()
 }
 
 // SetLogger sets the logger for JobManager
 func (m *JobManager) SetLogger(logger Logger) {
+	m.cfgMu.Lock()
+	defer m.cfgMu.Unlock()
 	m.logger = logger
 }
 
 // SetErrorHandler sets a custom error handler for failed IO operations
 func (m *JobManager) SetErrorHandler(handler ErrorHandler) {
+	m.cfgMu.Lock()
+	defer m.cfgMu.Unlock()
 	m.errorHandler = handler
+}
+
+func (m *JobManager) getRetryPolicyLocked() RetryPolicy {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.retryPolicy
+}
+
+func (m *JobManager) getLoggerLocked() Logger {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.logger
+}
+
+func (m *JobManager) getErrorHandlerLocked() ErrorHandler {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.errorHandler
+}
+
+func (m *JobManager) getRuntimeConfigSnapshotLocked() runtimeConfigSnapshot {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return runtimeConfigSnapshot{
+		retryPolicy:  m.retryPolicy,
+		logger:       m.logger,
+		errorHandler: m.errorHandler,
+	}
 }
 
 // =============================================================================
@@ -124,7 +166,12 @@ func RegisterHandler[T any](m *JobManager, jobType string, handler TypedHandler[
 		errChan <- nil
 	})
 
-	return <-errChan
+	select {
+	case err := <-errChan:
+		return err
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("register handler timeout for job type %s", jobType)
+	}
 }
 
 // =============================================================================
@@ -147,6 +194,9 @@ func (m *JobManager) SubmitDelayedJob(
 ) error {
 	if m.closed.Load() {
 		return fmt.Errorf("JobManager is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Serialize args (CPU-bound, do outside runners)
@@ -171,13 +221,19 @@ func (m *JobManager) SubmitDelayedJob(
 	parentCtx := ctx
 
 	// Submit to controlRunner and wait for result
-	// By running the entire submit logic on controlRunner, we ensure
-	// sequential execution and atomic check-and-add without needing a mutex
+	// Durable-ack semantics:
+	// return nil only after persistence layer confirms job durability.
 	resultChan := make(chan error, 1)
 	m.controlRunner.PostTask(func(_ context.Context) {
 		resultChan <- m.submitJobControl(parentCtx, entity, traits, delay)
 	})
-	return <-resultChan
+
+	select {
+	case err := <-resultChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // submitJobControl: Layer 1 - Fast validation and scheduling
@@ -214,9 +270,7 @@ func (m *JobManager) submitJobControl(
 	m.activeJobs.Store(entity.ID, info)
 
 	// 4. Delegate to Layer 2 (IO operations)
-	m.submitJobIO(ctx, entity, jobCtx, handler, traits, delay, info)
-
-	return nil
+	return m.submitJobIO(ctx, entity, jobCtx, handler, traits, delay, info)
 }
 
 // submitJobIO: Layer 2 - Database operations (on ioRunner)
@@ -228,34 +282,57 @@ func (m *JobManager) submitJobIO(
 	traits TaskTraits,
 	delay time.Duration,
 	info *activeJobInfo,
-) {
+) error {
+	result := make(chan error, 1)
+
 	m.ioRunner.PostTask(func(_ context.Context) {
-		// 1. Check DB for duplicates (may be slow)
-		existing, _ := m.store.GetJob(ctx, entity.ID)
-		if existing != nil && (existing.Status == JobStatusPending || existing.Status == JobStatusRunning) {
-			// Duplicate found, rollback activeJobs
-			m.controlRunner.PostTask(func(_ context.Context) {
-				m.activeJobs.Delete(entity.ID)
-				info.cancel()
-			})
+		// 1. Persist with durable create semantics
+		err := m.persistNewJobIO(ctx, entity)
+		if err != nil {
+			// Roll back active tracking immediately. sync.Map allows concurrent access.
+			m.activeJobs.Delete(entity.ID)
+			info.cancel()
+
+			if errors.Is(err, ErrJobAlreadyExists) {
+				result <- fmt.Errorf("job %s already exists", entity.ID)
+			} else {
+				result <- err
+			}
 			return
 		}
 
-		// 2. Save to DB (may be slow)
-		if err := m.store.SaveJob(ctx, entity); err != nil {
-			// Save failed, rollback activeJobs
-			m.controlRunner.PostTask(func(_ context.Context) {
-				m.activeJobs.Delete(entity.ID)
-				info.cancel()
-			})
-			return
-		}
-
-		// 3. Mark as saved
+		// 2. Mark as saved
 		info.dbSaved.Store(true)
 
-		// 4. Schedule execution on Layer 3
+		// 3. Schedule execution on Layer 3
 		m.scheduleExecution(entity, jobCtx, handler, traits, delay)
+		result <- nil
+	})
+
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *JobManager) persistNewJobIO(ctx context.Context, entity *JobEntity) error {
+	if creator, ok := m.store.(DurableJobStore); ok {
+		return m.retryIOOperation(ctx, "CreateJob", entity.ID, func(ctx context.Context) error {
+			return creator.CreateJob(ctx, entity)
+		})
+	}
+
+	// Legacy fallback for stores without atomic create support.
+	existing, err := m.store.GetJob(ctx, entity.ID)
+	if err == nil && existing != nil &&
+		(existing.Status == JobStatusPending || existing.Status == JobStatusRunning) {
+		return ErrJobAlreadyExists
+	}
+
+	return m.retryIOOperation(ctx, "SaveJob", entity.ID, func(ctx context.Context) error {
+		return m.store.SaveJob(ctx, entity)
 	})
 }
 
@@ -326,7 +403,12 @@ func (m *JobManager) CancelJob(id string) error {
 		errChan <- m.cancelJobControl(id)
 	})
 
-	return <-errChan
+	select {
+	case err := <-errChan:
+		return err
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("cancel job timeout for %s", id)
+	}
 }
 
 func (m *JobManager) cancelJobControl(id string) error {
@@ -378,48 +460,66 @@ func (m *JobManager) retryIOOperation(
 	jobID string,
 	fn func(context.Context) error,
 ) error {
+	cfg := m.getRuntimeConfigSnapshotLocked()
+	policy := cfg.retryPolicy
+	logger := cfg.logger
+	handler := cfg.errorHandler
+
 	var lastErr error
-	for attempt := 0; attempt <= m.retryPolicy.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		if err := fn(ctx); err == nil {
 			// Success
 			if attempt > 0 {
-				m.logger.Debug("IO operation succeeded after retry",
+				logger.Debug("IO operation succeeded after retry",
 					F("operation", operation),
 					F("jobID", jobID),
 					F("attempt", attempt))
 			}
 			return nil
 		} else {
+			if errors.Is(err, ErrJobAlreadyExists) {
+				return err
+			}
 			lastErr = err
 			// Log retry attempt
-			m.logger.Warn("IO operation failed, retrying",
+			logger.Warn("IO operation failed, retrying",
 				F("operation", operation),
 				F("jobID", jobID),
 				F("attempt", attempt),
-				F("maxRetries", m.retryPolicy.MaxRetries),
+				F("maxRetries", policy.MaxRetries),
 				F("error", err))
 
-			if attempt < m.retryPolicy.MaxRetries {
+			if attempt < policy.MaxRetries {
 				// Calculate delay and wait
-				delay := m.retryPolicy.calculateDelay(attempt)
-				m.logger.Debug("Waiting before retry",
+				delay := policy.calculateDelay(attempt)
+				logger.Debug("Waiting before retry",
 					F("delay", delay),
 					F("attempt", attempt+1))
-				time.Sleep(delay)
+				if delay > 0 {
+					select {
+					case <-time.After(delay):
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
 			}
 		}
 	}
 
 	// All retries failed
-	m.logger.Error("IO operation failed after all retries",
+	logger.Error("IO operation failed after all retries",
 		F("operation", operation),
 		F("jobID", jobID),
-		F("totalAttempts", m.retryPolicy.MaxRetries+1),
+		F("totalAttempts", policy.MaxRetries+1),
 		F("error", lastErr))
 
 	// Call error handler if set
-	if m.errorHandler != nil {
-		m.errorHandler(jobID, operation, lastErr)
+	if handler != nil {
+		handler(jobID, operation, lastErr)
 	}
 
 	return lastErr
@@ -529,6 +629,7 @@ func (m *JobManager) doRecoveryIO(ctx context.Context) error {
 			// Get handler
 			rawHandler, ok := m.handlers.Load(jobCopy.Type)
 			if !ok {
+				m.updateStatusIO(jobCopy.ID, JobStatusFailed, "Missing handler during recovery")
 				close(done)
 				return
 			}

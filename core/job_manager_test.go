@@ -873,6 +873,10 @@ func (s *DuplicateGetJobStore) GetJob(ctx context.Context, id string) (*core.Job
 	}, nil
 }
 
+func (s *DuplicateGetJobStore) CreateJob(ctx context.Context, job *core.JobEntity) error {
+	return core.ErrJobAlreadyExists
+}
+
 type SaveFailJobStore struct {
 	*core.MemoryJobStore
 }
@@ -884,6 +888,10 @@ func NewSaveFailJobStore() *SaveFailJobStore {
 }
 
 func (s *SaveFailJobStore) SaveJob(ctx context.Context, job *core.JobEntity) error {
+	return fmt.Errorf("save failed intentionally")
+}
+
+func (s *SaveFailJobStore) CreateJob(ctx context.Context, job *core.JobEntity) error {
 	return fmt.Errorf("save failed intentionally")
 }
 
@@ -1019,8 +1027,8 @@ func TestJobManager_SubmitJobIO_DuplicateInStoreRollsBackActiveJobs(t *testing.T
 
 	// Act
 	err := manager.SubmitJob(context.Background(), "job-dup", "dup", Args{Name: "x"}, core.DefaultTaskTraits())
-	if err != nil {
-		t.Fatalf("SubmitJob returned unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("SubmitJob() = nil, want duplicate error")
 	}
 
 	time.Sleep(200 * time.Millisecond)
@@ -1065,8 +1073,8 @@ func TestJobManager_SubmitJobIO_SaveFailureRollsBackActiveJobs(t *testing.T) {
 
 	// Act
 	err := manager.SubmitJob(context.Background(), "job-save-fail", "savefail", Args{Name: "x"}, core.DefaultTaskTraits())
-	if err != nil {
-		t.Fatalf("SubmitJob returned unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("SubmitJob() = nil, want save failure error")
 	}
 
 	time.Sleep(200 * time.Millisecond)
@@ -1755,7 +1763,10 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 
 	// Act - Try to submit duplicate
 	args := EmailArgs{To: "user@example.com"}
-	_ = manager.SubmitJob(ctx, "job1", "email", args, core.DefaultTaskTraits())
+	err := manager.SubmitJob(ctx, "job1", "email", args, core.DefaultTaskTraits())
+	if err == nil {
+		t.Fatal("SubmitJob() = nil, want duplicate error")
+	}
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -1773,7 +1784,6 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 		t.Errorf("Status = %s, want PENDING (original)", job.Status)
 	}
 
-	_ = err // Submission error depends on timing
 }
 
 // =============================================================================
