@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
@@ -20,13 +21,13 @@ func main() {
 	{
 		runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 
-		executed := 0
+		var executed atomic.Int32
 		for i := 0; i < 10; i++ {
 			id := i
 			runner.PostTask(func(ctx context.Context) {
 				time.Sleep(50 * time.Millisecond)
-				executed++
-				fmt.Printf("  Task %d executed\n", id)
+				count := executed.Add(1)
+				fmt.Printf("  Task %d executed (count=%d)\n", id, count)
 			})
 		}
 
@@ -35,10 +36,10 @@ func main() {
 
 		// Shutdown - remaining tasks won't execute
 		runner.Shutdown()
-		fmt.Printf("  Shutdown called. Executed: %d/10\n", executed)
+		fmt.Printf("  Shutdown called. Executed: %d/10\n", executed.Load())
 
 		time.Sleep(200 * time.Millisecond)
-		fmt.Printf("  Final count: %d/10 (remaining tasks cleared)\n", executed)
+		fmt.Printf("  Final count: %d/10 (remaining tasks cleared)\n", executed.Load())
 	}
 	fmt.Println()
 
@@ -47,16 +48,16 @@ func main() {
 	{
 		runner := taskrunner.CreateTaskRunner(taskrunner.DefaultTaskTraits())
 
-		counter1 := 0
+		var counter1 atomic.Int32
 		runner.PostRepeatingTask(func(ctx context.Context) {
-			counter1++
-			fmt.Printf("  Repeating task 1: #%d\n", counter1)
+			count := counter1.Add(1)
+			fmt.Printf("  Repeating task 1: #%d\n", count)
 		}, 100*time.Millisecond)
 
-		counter2 := 0
+		var counter2 atomic.Int32
 		runner.PostRepeatingTask(func(ctx context.Context) {
-			counter2++
-			fmt.Printf("  Repeating task 2: #%d\n", counter2)
+			count := counter2.Add(1)
+			fmt.Printf("  Repeating task 2: #%d\n", count)
 		}, 150*time.Millisecond)
 
 		// Let them run for a while
@@ -65,14 +66,14 @@ func main() {
 		fmt.Println("  Calling Shutdown()...")
 		runner.Shutdown()
 
-		beforeCount1 := counter1
-		beforeCount2 := counter2
+		beforeCount1 := counter1.Load()
+		beforeCount2 := counter2.Load()
 
 		// Wait to verify they stopped
 		time.Sleep(400 * time.Millisecond)
 
-		fmt.Printf("  Task 1: %d -> %d (stopped)\n", beforeCount1, counter1)
-		fmt.Printf("  Task 2: %d -> %d (stopped)\n", beforeCount2, counter2)
+		fmt.Printf("  Task 1: %d -> %d (stopped)\n", beforeCount1, counter1.Load())
+		fmt.Printf("  Task 2: %d -> %d (stopped)\n", beforeCount2, counter2.Load())
 	}
 	fmt.Println()
 

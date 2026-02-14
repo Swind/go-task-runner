@@ -10,7 +10,8 @@ import (
 )
 
 func main() {
-	// Use only 1 worker to clearly demonstrate priority preemption/ordering effects
+	// Use 1 worker so the two runners must compete for the same worker.
+	// This demonstrates scheduler-level priority across runners.
 	taskrunner.InitGlobalThreadPool(1)
 	defer taskrunner.ShutdownGlobalThreadPool()
 
@@ -28,15 +29,9 @@ func main() {
 		fmt.Println("Generic Low Priority Task Finished")
 	}, taskrunner.TraitsBestEffort())
 
-	// 2. Post a High Priority task immediately after
-	// Since the worker is blocked, this will be queued.
-	// But it should be picked up before any other BestEffort tasks if we had more.
-
-	// Note: Within a SequencedTaskRunner, STRICT FIFO is observed.
-	// Priority only affects when the *RunLoop* itself gets scheduled by the Scheduler.
-	// To demonstrate Priority Scheduler, we strictly speaking need *multiple* runners or use global PostTask if available.
-	// But here we use SequencedTaskRunner. If we post these to the SAME runner, they run sequentially (FIFO).
-	// To show Preemption/Priority scheduling, we should use two DIFFERENT runners.
+	// 2. Post a high-priority task on a different runner.
+	// SequencedTaskRunner itself is FIFO; priority differences are visible when
+	// multiple runners compete for scheduler/worker time.
 
 	runnerHigh := taskrunner.CreateTaskRunner(taskrunner.TraitsUserBlocking())
 

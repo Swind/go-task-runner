@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
@@ -106,10 +107,10 @@ func main() {
 	{
 		runner := taskrunner.NewSingleThreadTaskRunner()
 
-		counter := 0
+		var counter atomic.Int32
 		handle := runner.PostRepeatingTask(func(ctx context.Context) {
-			counter++
-			fmt.Printf("  Heartbeat #%d\n", counter)
+			count := counter.Add(1)
+			fmt.Printf("  Heartbeat #%d\n", count)
 		}, 100*time.Millisecond)
 
 		time.Sleep(450 * time.Millisecond)
@@ -117,7 +118,7 @@ func main() {
 		handle.Stop()
 
 		time.Sleep(200 * time.Millisecond)
-		fmt.Printf("  Final count: %d (stopped)\n", counter)
+		fmt.Printf("  Final count: %d (stopped)\n", counter.Load())
 
 		runner.Stop()
 	}
@@ -146,7 +147,9 @@ func main() {
 			})
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		if err := runner.WaitIdle(context.Background()); err != nil {
+			fmt.Printf("  WaitIdle error: %v\n", err)
+		}
 		fmt.Printf("  Final state: counter=%d, items=%v\n", state.counter, state.items)
 
 		runner.Stop()
@@ -192,11 +195,11 @@ func main() {
 		runner := taskrunner.NewSingleThreadTaskRunner()
 
 		fmt.Println("  Starting repeating task with 200ms initial delay...")
-		counter := 0
+		var counter atomic.Int32
 		handle := runner.PostRepeatingTaskWithInitialDelay(
 			func(ctx context.Context) {
-				counter++
-				fmt.Printf("  Execution #%d\n", counter)
+				count := counter.Add(1)
+				fmt.Printf("  Execution #%d\n", count)
 			},
 			200*time.Millisecond, // Initial delay
 			100*time.Millisecond, // Interval
@@ -206,7 +209,7 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 		handle.Stop()
 
-		fmt.Printf("  Stopped after %d executions\n", counter)
+		fmt.Printf("  Stopped after %d executions\n", counter.Load())
 		runner.Stop()
 	}
 	fmt.Println()

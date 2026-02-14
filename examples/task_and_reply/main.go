@@ -15,6 +15,8 @@ func main() {
 	defer taskrunner.ShutdownGlobalThreadPool()
 
 	fmt.Println("=== PostTaskAndReply Examples ===")
+	fmt.Println("Note: This demo uses short Sleep calls for readable output ordering.")
+	fmt.Println("In production code, prefer WaitIdle/WaitShutdown/channels for synchronization.")
 	fmt.Println()
 
 	// Example 1: Basic PostTaskAndReply

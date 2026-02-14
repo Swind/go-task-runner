@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
@@ -25,13 +26,13 @@ func (h *CustomPanicHandler) HandlePanic(ctx context.Context, runnerName string,
 
 // CustomMetrics demonstrates a custom metrics collector
 type CustomMetrics struct {
-	taskCount      int
-	panicCount     int
-	rejectionCount int
+	taskCount      atomic.Int64
+	panicCount     atomic.Int64
+	rejectionCount atomic.Int64
 }
 
 func (m *CustomMetrics) RecordTaskDuration(runnerName string, priority core.TaskPriority, duration time.Duration) {
-	m.taskCount++
+	m.taskCount.Add(1)
 	// In a real implementation, you would send this to Prometheus, StatsD, etc.
 	if duration > 100*time.Millisecond {
 		log.Printf("[METRICS] Slow task detected: %s took %v\n", runnerName, duration)
@@ -39,9 +40,9 @@ func (m *CustomMetrics) RecordTaskDuration(runnerName string, priority core.Task
 }
 
 func (m *CustomMetrics) RecordTaskPanic(runnerName string, panicInfo any) {
-	m.panicCount++
+	count := m.panicCount.Add(1)
 	log.Printf("[METRICS] Panic recorded in %s: %v (total panics: %d)\n",
-		runnerName, panicInfo, m.panicCount)
+		runnerName, panicInfo, count)
 }
 
 func (m *CustomMetrics) RecordQueueDepth(runnerName string, depth int) {
@@ -52,9 +53,9 @@ func (m *CustomMetrics) RecordQueueDepth(runnerName string, depth int) {
 }
 
 func (m *CustomMetrics) RecordTaskRejected(runnerName string, reason string) {
-	m.rejectionCount++
+	count := m.rejectionCount.Add(1)
 	log.Printf("[METRICS] Task rejected in %s: %s (total rejections: %d)\n",
-		runnerName, reason, m.rejectionCount)
+		runnerName, reason, count)
 }
 
 // CustomRejectedTaskHandler demonstrates custom rejection handling
@@ -158,9 +159,9 @@ func customConfig() {
 
 	// Print metrics summary
 	fmt.Printf("\nMetrics Summary:\n")
-	fmt.Printf("  Tasks executed: %d\n", metrics.taskCount)
-	fmt.Printf("  Panics: %d\n", metrics.panicCount)
-	fmt.Printf("  Rejections: %d\n", metrics.rejectionCount)
+	fmt.Printf("  Tasks executed: %d\n", metrics.taskCount.Load())
+	fmt.Printf("  Panics: %d\n", metrics.panicCount.Load())
+	fmt.Printf("  Rejections: %d\n", metrics.rejectionCount.Load())
 }
 
 func monitorQueueDepth() {
