@@ -9,7 +9,7 @@ Claude should automatically apply this skill when:
 - User mentions "add comments to tests" or "document tests"
 - User asks to "fix flaky tests" or "remove time.Sleep"
 - User requests "clean up test code" or "make tests more readable"
-- Working with files ending in `_test.go`
+- Working with files ending in `_test.go` and the user asks for test quality improvements
 - User mentions "AAA pattern", "BDD", or "test structure"
 
 ## Core Refactoring Standards
@@ -65,7 +65,13 @@ func TestCalculateTotal(t *testing.T) {
 
 ### 3. Eliminate Flaky Tests
 
-**NEVER use `time.Sleep` for synchronization.** Replace with proper Go primitives:
+Prefer not to use `time.Sleep` for synchronization when a deterministic primitive is available.
+Use `WaitGroup`, channels, or context-based signals first.
+
+Exception: timing/scheduler behavior tests may use bounded `time.Sleep` with:
+- clear rationale in comments
+- timeout guard (`select` + `time.After` or `context.WithTimeout`)
+- stable upper bounds to avoid flaky CI behavior
 
 #### ❌ Bad (Flaky):
 ```go
@@ -314,7 +320,7 @@ When refactoring a test file, ensure ALL of these items are addressed:
 
 - [ ] **Intent Comments**: Every test has Given-When-Then comment
 - [ ] **AAA Sections**: Arrange, Act, Assert clearly marked
-- [ ] **No time.Sleep**: Replaced with WaitGroup/channels/context
+- [ ] **Sleep usage justified**: Replaced with deterministic sync OR documented as timing-test necessity
 - [ ] **Timeout Protection**: Async operations have timeout guards
 - [ ] **Descriptive Errors**: All assertions explain expected vs. actual
 - [ ] **Table-Driven**: Multiple scenarios use table-driven approach

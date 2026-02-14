@@ -195,19 +195,19 @@ func main() {
 
 **Simple CRUD?** → Use templates above ✓
 
-**Need more?** → Read specific doc:
+**Need more?** → Read specific doc (paths are relative to this skill directory):
 ```bash
 # Multiple flags, validation
-view /mnt/skills/user/go-cli-architecture/docs/cli-layer.md
+docs/cli-layer.md
 
 # Complex business logic
-view /mnt/skills/user/go-cli-architecture/docs/service-layer.md
+docs/service-layer.md
 
 # Testing
-view /mnt/skills/user/go-cli-architecture/docs/testing.md
+docs/testing.md
 
 # Patterns (DI, formatting, config)
-view /mnt/skills/user/go-cli-architecture/docs/patterns.md
+docs/patterns.md
 ```
 
 ## Decision Tree

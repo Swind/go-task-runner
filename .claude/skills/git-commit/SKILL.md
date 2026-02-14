@@ -1,6 +1,6 @@
 ---
 name: Git Commit
-description: Generates storytelling-focused Conventional Commits messages with Jira context integration, then commits and pushes changes. Use when the user says "commit", "git commit", or asks to commit changes, wants to create a commit, or when work is complete and ready to commit.
+description: Generates storytelling-focused Conventional Commits messages with optional Jira context, then commits changes. Push is optional and only when explicitly requested.
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git add:*), Bash(git branch:*), Bash(git log:*), AskUserQuestion, mcp__zapier__jira_software_cloud_find_issue_by_key
 license: MIT
 metadata:
@@ -11,7 +11,7 @@ metadata:
 
 # Git Commit
 
-Generate Conventional Commits messages that tell a complete story for future code archeology, with Jira ticket context integration.
+Generate Conventional Commits messages that tell a complete story for future code archeology, with optional Jira ticket context integration.
 
 ## When to Use This Skill
 
@@ -54,16 +54,19 @@ Parse the current branch name to find Jira ticket IDs using these patterns:
 - `feature/PROJ-123-description`
 - `PROJ-123`
 
-If a Jira ticket ID is found:
+If a Jira ticket ID is found and Jira MCP is available:
 - Use `mcp__zapier__jira_software_cloud_find_issue_by_key` to fetch ticket details
 - Get title, description, acceptance criteria, comments
 - Use this context to understand the broader purpose of the changes
 
+If Jira context is unavailable, continue with local git context only.
+
 ### 3. Human-in-the-Loop - Ask for Context
 
-**ALWAYS use the AskUserQuestion tool to ask WHY the change was made.**
+Ask WHY the change was made.
 
-Based on the diff and Jira context (if available), generate 3-4 plausible options for why the change was made. Present these as multiple choice options using AskUserQuestion.
+If AskUserQuestion is available, generate 3-4 plausible options based on diff/Jira context.
+If AskUserQuestion is unavailable, ask a short direct question in normal chat and proceed with the user's answer.
 
 **Example:**
 ```
@@ -118,13 +121,13 @@ Problem solved:
 - **perf**: performance improvements
 - **ci**: continuous integration changes
 
-### 6. Execute Commit and Push (Requires Confirmation)
+### 6. Execute Commit (and Optional Push)
 
 **IMPORTANT: Do not use `git add -A` or `git add .`**
 Commit only the files that are already staged and understood.
 
-**CRITICAL: The user MUST confirm before executing `git commit` or `git push`.**
-These commands are intentionally NOT in the allowed-tools list, so the user will be prompted for approval.
+Only run `git commit` after explicit user intent to commit.
+Only run `git push` when the user explicitly asks to push.
 
 After receiving the user's approval of the commit message:
 
@@ -147,7 +150,7 @@ EOF
 )"
 ```
 
-2. **Push**:
+2. **Push (optional; only if requested)**:
 ```bash
 git push
 ```

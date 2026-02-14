@@ -4,6 +4,17 @@ description: Expert in designing Go applications following Clean Architecture an
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
+## Applicability
+
+Use this skill for application/service codebases with clear business domains.
+
+Do NOT apply this structure blindly to:
+- Framework/library repositories
+- Small utility packages
+- Repos where public API stability is more important than layered decomposition
+
+For this repository (`go-task-runner`), treat this skill as reference only, not a mandatory migration target.
+
 ## Architecture Layers
 
 ### 1. Domain Layer (Entities)

@@ -72,7 +72,7 @@ pool := taskrunner.NewGoroutineThreadPool("MyPool", 8)
 pool.Start(context.Background())
 defer pool.Stop()
 
-runner := core.NewSequencedTaskRunner(pool)
+runner := taskrunner.NewSequencedTaskRunner(pool)
 defer runner.Shutdown()
 ```
 

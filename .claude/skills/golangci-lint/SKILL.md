@@ -14,6 +14,9 @@ golangci-lint aggregates multiple Go linters. This skill provides common issues 
 # Run all linters
 golangci-lint run
 
+# Run with this repository's CI scope (matches .github/workflows/ci.yml)
+golangci-lint run core/... .
+
 # Run on specific files
 golangci-lint run path/to/file.go
 
@@ -124,7 +127,7 @@ path/to/file.go:10:2: Error message (linter-name)
 
 ## Workflow
 
-1. Run `golangci-lint run` to see all issues
+1. Run lint using repo CI scope first: `golangci-lint run core/... .`
 2. Try `golangci-lint run --fix` first for auto-fixable ones
 3. For manual fixes, identify linter name and apply pattern
 4. Run `go test ./...` after each fix
