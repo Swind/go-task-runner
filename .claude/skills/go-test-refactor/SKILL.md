@@ -1,3 +1,9 @@
+---
+name: go-test-refactor
+description: Refactor Go tests for reliability and maintainability, with structured BDD/AAA conventions applied pragmatically.
+tools: Read, Write, Edit, Bash, Glob, Grep
+---
+
 # Go Test Refactoring Expert
 
 ## Description

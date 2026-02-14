@@ -1,6 +1,6 @@
 ---
 name: golangci-lint
-description: Go code quality checker usage and common fix patterns
+description: Go lint workflow and common fix patterns, aligned with this repository's CI lint scope.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

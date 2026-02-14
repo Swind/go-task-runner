@@ -1,6 +1,6 @@
 ---
 name: go-test-doc
-description: Add professional documentation to Go test files using BDD-style (Given-When-Then) comments and AAA pattern organization. Use when adding comments to tests, documenting test cases, improving test readability, or working with *_test.go files that need better documentation.
+description: Add clear documentation to Go tests with BDD-style (Given-When-Then) comments and AAA organization when readability benefits.
 ---
 
 # Go Test Documentation Expert

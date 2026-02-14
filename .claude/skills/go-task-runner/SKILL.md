@@ -1,6 +1,6 @@
 ---
 name: go-task-runner
-description: Expert in using go-task-runner library for lock-free concurrent programming with virtual threads
+description: Guidance for go-task-runner lock-free virtual-thread patterns in educational/experimental contexts.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

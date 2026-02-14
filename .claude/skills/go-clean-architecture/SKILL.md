@@ -1,6 +1,6 @@
 ---
 name: go-clean-architecture
-description: Expert in designing Go applications following Clean Architecture and DDD principles
+description: Reference guide for applying Clean Architecture/DDD to service-oriented Go apps; not a mandatory target for library repositories.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

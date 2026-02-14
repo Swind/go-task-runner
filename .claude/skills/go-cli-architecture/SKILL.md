@@ -1,6 +1,6 @@
 ---
 name: go-cli-architecture
-description: Go CLI with urfave/cli framework and service layer separation
+description: For Go CLI applications using urfave/cli with command/service separation; not intended for non-CLI library repositories.
 tools: Read, Write, Edit, Bash, Grep
 ---
 
