@@ -910,6 +910,54 @@ func (s *BlockingRecoveryStore) ListJobs(ctx context.Context, filter core.JobFil
 	return nil, ctx.Err()
 }
 
+// LegacyOnlyJobStore emulates a JobStore implementation without DurableJobStore.CreateJob.
+type LegacyOnlyJobStore struct {
+	*core.MemoryJobStore
+}
+
+func NewLegacyOnlyJobStore() *LegacyOnlyJobStore {
+	return &LegacyOnlyJobStore{MemoryJobStore: core.NewMemoryJobStore()}
+}
+
+// ListJobsFailStore fails ListJobs during recovery.
+type ListJobsFailStore struct {
+	*core.MemoryJobStore
+}
+
+func NewListJobsFailStore() *ListJobsFailStore {
+	return &ListJobsFailStore{MemoryJobStore: core.NewMemoryJobStore()}
+}
+
+func (s *ListJobsFailStore) ListJobs(ctx context.Context, filter core.JobFilter) ([]*core.JobEntity, error) {
+	return nil, fmt.Errorf("list jobs failed intentionally")
+}
+
+// RecoverableFailStore fails GetRecoverableJobs during recovery.
+type RecoverableFailStore struct {
+	*core.MemoryJobStore
+}
+
+func NewRecoverableFailStore() *RecoverableFailStore {
+	return &RecoverableFailStore{MemoryJobStore: core.NewMemoryJobStore()}
+}
+
+func (s *RecoverableFailStore) GetRecoverableJobs(ctx context.Context) ([]*core.JobEntity, error) {
+	return nil, fmt.Errorf("recoverable jobs failed intentionally")
+}
+
+// AlwaysFailCreateStore simulates persistent creation failures.
+type AlwaysFailCreateStore struct {
+	*core.MemoryJobStore
+}
+
+func NewAlwaysFailCreateStore() *AlwaysFailCreateStore {
+	return &AlwaysFailCreateStore{MemoryJobStore: core.NewMemoryJobStore()}
+}
+
+func (s *AlwaysFailCreateStore) CreateJob(ctx context.Context, job *core.JobEntity) error {
+	return fmt.Errorf("create failed intentionally")
+}
+
 func NewFailingJobStore(maxFailures int) *FailingJobStore {
 	return &FailingJobStore{
 		MemoryJobStore: core.NewMemoryJobStore(),
@@ -2156,4 +2204,192 @@ func TestJobManager_Start_WaitsForRecovery(t *testing.T) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = manager.Shutdown(shutdownCtx)
+}
+
+// TestJobManager_SubmitJob_LegacyStoreFallback verifies durable-ack fallback path for legacy stores
+// Given: A JobStore implementation without DurableJobStore.CreateJob
+// When: SubmitJob is called
+// Then: Job is persisted and executed successfully
+func TestJobManager_SubmitJob_LegacyStoreFallback(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := NewLegacyOnlyJobStore()
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		store,
+		core.NewJSONSerializer(),
+	)
+
+	type Args struct {
+		Val string `json:"val"`
+	}
+
+	done := make(chan struct{}, 1)
+	_ = core.RegisterHandler(manager, "legacy", func(ctx context.Context, args Args) error {
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	// Act
+	if err := manager.SubmitJob(context.Background(), "legacy-1", "legacy", Args{Val: "ok"}, core.DefaultTaskTraits()); err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Assert
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not execute")
+	}
+}
+
+// TestJobManager_SubmitJob_ContextTimeoutDuringRetry verifies SubmitJob returns context error during retry backoff
+// Given: A store that always fails CreateJob and a short timeout context
+// When: SubmitJob triggers retry with delay
+// Then: SubmitJob returns context timeout error
+func TestJobManager_SubmitJob_ContextTimeoutDuringRetry(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := NewAlwaysFailCreateStore()
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		store,
+		core.NewJSONSerializer(),
+	)
+
+	manager.SetRetryPolicy(core.RetryPolicy{
+		MaxRetries:   3,
+		InitialDelay: 500 * time.Millisecond,
+		MaxDelay:     500 * time.Millisecond,
+		BackoffRatio: 1.0,
+	})
+
+	type Args struct {
+		Val string `json:"val"`
+	}
+	_ = core.RegisterHandler(manager, "retry-timeout", func(ctx context.Context, args Args) error { return nil })
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := manager.SubmitJob(ctx, "retry-timeout-1", "retry-timeout", Args{Val: "x"}, core.DefaultTaskTraits())
+
+	// Assert
+	if err == nil {
+		t.Fatal("SubmitJob() = nil, want context timeout error")
+	}
+}
+
+// TestJobManager_Start_ListJobsError verifies Start propagates ListJobs errors
+// Given: A recovery store that fails ListJobs
+// When: Start is called
+// Then: Start returns error
+func TestJobManager_Start_ListJobsError(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		NewListJobsFailStore(),
+		core.NewJSONSerializer(),
+	)
+
+	// Act
+	err := manager.Start(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("Start() = nil, want list jobs error")
+	}
+}
+
+// TestJobManager_Start_GetRecoverableJobsError verifies Start propagates GetRecoverableJobs errors
+// Given: A recovery store that fails GetRecoverableJobs
+// When: Start is called
+// Then: Start returns error
+func TestJobManager_Start_GetRecoverableJobsError(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		NewRecoverableFailStore(),
+		core.NewJSONSerializer(),
+	)
+
+	// Act
+	err := manager.Start(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("Start() = nil, want recoverable jobs error")
+	}
+}
+
+// TestJobManager_Start_MissingHandlerMarksJobFailed verifies missing handler during recovery marks job as FAILED
+// Given: A recoverable PENDING job with unregistered type
+// When: Start performs recovery
+// Then: Job is marked FAILED with missing handler message
+func TestJobManager_Start_MissingHandlerMarksJobFailed(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := core.NewMemoryJobStore()
+	manager := core.NewJobManager(
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		core.NewSequencedTaskRunner(pool),
+		store,
+		core.NewJSONSerializer(),
+	)
+
+	ctx := context.Background()
+	_ = store.SaveJob(ctx, &core.JobEntity{
+		ID:       "missing-handler-job",
+		Type:     "unknown-type",
+		ArgsData: []byte(`{}`),
+		Status:   core.JobStatusPending,
+		Priority: 1,
+	})
+
+	// Act
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Assert
+	job, err := manager.GetJob(ctx, "missing-handler-job")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusFailed {
+		t.Fatalf("Status = %s, want FAILED", job.Status)
+	}
+	if job.Result != "Missing handler during recovery" {
+		t.Fatalf("Result = %q, want %q", job.Result, "Missing handler during recovery")
+	}
 }
