@@ -37,6 +37,7 @@ type RepeatingTaskHandle = core.RepeatingTaskHandle
 // Observability snapshot types
 type RunnerStats = core.RunnerStats
 type PoolStats = core.PoolStats
+type TaskExecutionRecord = core.TaskExecutionRecord
 
 // Priority constants
 const (

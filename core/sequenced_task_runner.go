@@ -24,6 +24,8 @@ type SequencedTaskRunner struct {
 	name       string
 	metadata   map[string]any
 	metadataMu sync.Mutex // Protects name and metadata
+
+	history executionHistory
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -32,6 +34,7 @@ func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
 		queue:        NewFIFOTaskQueue(),
 		shutdownChan: make(chan struct{}),
 		metadata:     make(map[string]any),
+		history:      newExecutionHistory(defaultTaskHistoryCapacity),
 	}
 }
 
@@ -90,17 +93,36 @@ func (r *SequencedTaskRunner) RunningTaskCount() int {
 
 // Stats returns current observability data for this runner.
 func (r *SequencedTaskRunner) Stats() RunnerStats {
-	name := r.Name()
-	if name == "" {
-		name = "sequenced"
-	}
-	return RunnerStats{
+	name := r.observabilityName()
+	stats := RunnerStats{
 		Name:    name,
 		Type:    "sequenced",
 		Pending: r.PendingTaskCount(),
 		Running: r.RunningTaskCount(),
 		Closed:  r.IsClosed(),
 	}
+	if last, ok := r.history.Last(); ok {
+		stats.LastTaskName = last.Name
+		stats.LastTaskAt = last.FinishedAt
+	}
+	return stats
+}
+
+// RecentTasks returns completed task execution records in newest-first order.
+func (r *SequencedTaskRunner) RecentTasks(limit int) []TaskExecutionRecord {
+	return r.history.Recent(limit)
+}
+
+func (r *SequencedTaskRunner) observabilityName() string {
+	name := r.Name()
+	if name == "" {
+		return "sequenced"
+	}
+	return name
+}
+
+func (r *SequencedTaskRunner) recordTaskExecution(record TaskExecutionRecord) {
+	r.history.Add(record)
 }
 
 func (r *SequencedTaskRunner) emitQueueDepth(depth int) {
@@ -110,11 +132,7 @@ func (r *SequencedTaskRunner) emitQueueDepth(depth int) {
 	if tp, ok := r.threadPool.(schedulerGetter); ok {
 		if scheduler := tp.GetScheduler(); scheduler != nil {
 			if metrics := scheduler.GetMetrics(); metrics != nil {
-				name := r.Name()
-				if name == "" {
-					name = "sequenced"
-				}
-				metrics.RecordQueueDepth(name, depth)
+				metrics.RecordQueueDepth(r.observabilityName(), depth)
 			}
 		}
 	}
@@ -240,12 +258,24 @@ func (r *SequencedTaskRunner) PostTask(task Task) {
 
 // PostTaskWithTraits submits a task with specified traits
 func (r *SequencedTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
+	r.PostTaskWithTraitsNamed("", task, traits)
+}
+
+// PostTaskNamed submits a task with a caller-provided display name.
+func (r *SequencedTaskRunner) PostTaskNamed(name string, task Task) {
+	r.PostTaskWithTraitsNamed(name, task, DefaultTaskTraits())
+}
+
+// PostTaskWithTraitsNamed submits a named task with specified traits.
+func (r *SequencedTaskRunner) PostTaskWithTraitsNamed(name string, task Task, traits TaskTraits) {
 	if r.closed.Load() {
 		return
 	}
 
+	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "sequenced", r.recordTaskExecution)
+
 	r.queueMu.Lock()
-	r.queue.Push(task, traits)
+	r.queue.Push(wrapped, traits)
 	depth := r.queue.Len()
 	r.queueMu.Unlock()
 	r.emitQueueDepth(depth)
@@ -260,7 +290,18 @@ func (r *SequencedTaskRunner) PostDelayedTask(task Task, delay time.Duration) {
 
 // PostDelayedTaskWithTraits submits a delayed task with specified traits
 func (r *SequencedTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
-	r.threadPool.PostDelayedInternal(task, delay, traits, r)
+	r.PostDelayedTaskWithTraitsNamed("", task, delay, traits)
+}
+
+// PostDelayedTaskNamed submits a delayed named task.
+func (r *SequencedTaskRunner) PostDelayedTaskNamed(name string, task Task, delay time.Duration) {
+	r.PostDelayedTaskWithTraitsNamed(name, task, delay, DefaultTaskTraits())
+}
+
+// PostDelayedTaskWithTraitsNamed submits a delayed named task with specified traits.
+func (r *SequencedTaskRunner) PostDelayedTaskWithTraitsNamed(name string, task Task, delay time.Duration, traits TaskTraits) {
+	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "sequenced", r.recordTaskExecution)
+	r.threadPool.PostDelayedInternal(wrapped, delay, traits, r)
 }
 
 // =============================================================================

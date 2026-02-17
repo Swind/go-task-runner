@@ -62,6 +62,8 @@ type SingleThreadTaskRunner struct {
 	name     string
 	metadata map[string]any
 	mu       sync.Mutex
+
+	history executionHistory
 }
 
 // NewSingleThreadTaskRunner creates and starts a new SingleThreadTaskRunner.
@@ -76,6 +78,7 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 		shutdownChan: make(chan struct{}),
 		metadata:     make(map[string]any),
 		queuePolicy:  QueuePolicyDrop, // Default: drop tasks when queue is full
+		history:      newExecutionHistory(defaultTaskHistoryCapacity),
 	}
 
 	// Start the dedicated message loop
@@ -135,17 +138,78 @@ func (r *SingleThreadTaskRunner) RunningTaskCount() int {
 
 // Stats returns current observability data for this runner.
 func (r *SingleThreadTaskRunner) Stats() RunnerStats {
-	name := r.Name()
-	if name == "" {
-		name = "single-thread"
-	}
-	return RunnerStats{
-		Name:     name,
+	stats := RunnerStats{
+		Name:     r.observabilityName(),
 		Type:     "single-thread",
 		Pending:  r.PendingTaskCount(),
 		Running:  r.RunningTaskCount(),
 		Rejected: r.RejectedCount(),
 		Closed:   r.IsClosed(),
+	}
+	if last, ok := r.history.Last(); ok {
+		stats.LastTaskName = last.Name
+		stats.LastTaskAt = last.FinishedAt
+	}
+	return stats
+}
+
+// RecentTasks returns completed task execution records in newest-first order.
+func (r *SingleThreadTaskRunner) RecentTasks(limit int) []TaskExecutionRecord {
+	return r.history.Recent(limit)
+}
+
+func (r *SingleThreadTaskRunner) observabilityName() string {
+	name := r.Name()
+	if name == "" {
+		return "single-thread"
+	}
+	return name
+}
+
+func (r *SingleThreadTaskRunner) recordTaskExecution(record TaskExecutionRecord) {
+	r.history.Add(record)
+}
+
+func (r *SingleThreadTaskRunner) enqueueTask(task Task, rejectTask Task, traits TaskTraits) {
+	if r.closed.Load() {
+		return
+	}
+
+	r.queuePolicyMu.RLock()
+	policy := r.queuePolicy
+	callback := r.rejectionCallback
+	r.queuePolicyMu.RUnlock()
+
+	switch policy {
+	case QueuePolicyDrop:
+		select {
+		case <-r.ctx.Done():
+			return
+		case r.workQueue <- task:
+			return
+		}
+
+	case QueuePolicyReject:
+		select {
+		case <-r.ctx.Done():
+			return
+		case r.workQueue <- task:
+			return
+		default:
+			r.rejectedCount.Add(1)
+			if callback != nil {
+				go callback(rejectTask, traits)
+			}
+			return
+		}
+
+	case QueuePolicyWait:
+		select {
+		case <-r.ctx.Done():
+			return
+		case r.workQueue <- task:
+			return
+		}
 	}
 }
 
@@ -192,58 +256,18 @@ func (r *SingleThreadTaskRunner) PostTask(task Task) {
 // - QueuePolicyReject: Calls the rejection callback if set
 // - QueuePolicyWait: Blocks until queue has space or context is done
 func (r *SingleThreadTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
-	// Check if runner is closed to avoid panic on closed channel
-	if r.closed.Load() {
-		return
-	}
+	r.PostTaskWithTraitsNamed("", task, traits)
+}
 
-	r.queuePolicyMu.RLock()
-	policy := r.queuePolicy
-	callback := r.rejectionCallback
-	r.queuePolicyMu.RUnlock()
+// PostTaskNamed submits a task with a caller-provided display name.
+func (r *SingleThreadTaskRunner) PostTaskNamed(name string, task Task) {
+	r.PostTaskWithTraitsNamed(name, task, DefaultTaskTraits())
+}
 
-	switch policy {
-	case QueuePolicyDrop:
-		// Default behavior: non-blocking send, drops task if queue is full
-		select {
-		case <-r.ctx.Done():
-			// Runner stopped, drop task
-			return
-		case r.workQueue <- task:
-			// Successfully queued
-			return
-		}
-
-	case QueuePolicyReject:
-		// Try to send, call callback if queue is full
-		select {
-		case <-r.ctx.Done():
-			// Runner stopped, drop task
-			return
-		case r.workQueue <- task:
-			// Successfully queued
-			return
-		default:
-			// Queue is full, reject the task
-			r.rejectedCount.Add(1)
-			if callback != nil {
-				// Call callback in goroutine to avoid blocking
-				go callback(task, traits)
-			}
-			return
-		}
-
-	case QueuePolicyWait:
-		// Blocking send, waits for space in queue or context cancellation
-		select {
-		case <-r.ctx.Done():
-			// Runner stopped, drop task
-			return
-		case r.workQueue <- task:
-			// Successfully queued
-			return
-		}
-	}
+// PostTaskWithTraitsNamed submits a named task with traits.
+func (r *SingleThreadTaskRunner) PostTaskWithTraitsNamed(name string, task Task, traits TaskTraits) {
+	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "single-thread", r.recordTaskExecution)
+	r.enqueueTask(wrapped, task, traits)
 }
 
 // PostDelayedTask submits a delayed task
@@ -255,18 +279,30 @@ func (r *SingleThreadTaskRunner) PostDelayedTask(task Task, delay time.Duration)
 // Uses time.AfterFunc which is independent of the global TaskScheduler,
 // ensuring IO-related timers are not affected by scheduler load.
 func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
+	r.PostDelayedTaskWithTraitsNamed("", task, delay, traits)
+}
+
+// PostDelayedTaskNamed submits a delayed named task.
+func (r *SingleThreadTaskRunner) PostDelayedTaskNamed(name string, task Task, delay time.Duration) {
+	r.PostDelayedTaskWithTraitsNamed(name, task, delay, DefaultTaskTraits())
+}
+
+// PostDelayedTaskWithTraitsNamed submits a delayed named task with traits.
+func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraitsNamed(name string, task Task, delay time.Duration, traits TaskTraits) {
 	if r.closed.Load() {
 		return
 	}
+
+	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "single-thread", r.recordTaskExecution)
 
 	select {
 	case <-r.ctx.Done():
 		return
 	default:
 		// time.AfterFunc spawns a new goroutine when the timer fires,
-		// we use PostTask to inject the task back into our main loop
+		// we enqueue the wrapped task back into our main loop
 		time.AfterFunc(delay, func() {
-			r.PostTaskWithTraits(task, traits)
+			r.enqueueTask(wrapped, task, traits)
 		})
 	}
 }
