@@ -105,7 +105,8 @@ func (s *TaskScheduler) PostInternal(task Task, traits TaskTraits) {
 	}
 
 	s.queue.Push(task, traits)
-	atomic.AddInt32(&s.metricQueued, 1) // Metric++
+	depth := atomic.AddInt32(&s.metricQueued, 1) // Metric++
+	s.metrics.RecordQueueDepth("TaskScheduler", int(depth))
 
 	select {
 	case s.signal <- struct{}{}:
@@ -129,7 +130,8 @@ func (s *TaskScheduler) GetWork(stopCh <-chan struct{}) (TaskItem, bool) {
 	for {
 		// Try to pop one task
 		if item, ok := s.queue.Pop(); ok {
-			atomic.AddInt32(&s.metricQueued, -1) // Metric-- (Left Queue)
+			depth := atomic.AddInt32(&s.metricQueued, -1) // Metric-- (Left Queue)
+			s.metrics.RecordQueueDepth("TaskScheduler", int(depth))
 			return item, true
 		}
 
@@ -151,6 +153,8 @@ func (s *TaskScheduler) Shutdown() {
 
 	// 3. Clear queue to release all task references (including runLoop bound methods)
 	s.queue.Clear()
+	atomic.StoreInt32(&s.metricQueued, 0)
+	s.metrics.RecordQueueDepth("TaskScheduler", 0)
 }
 
 // ShutdownGraceful waits for all queued and active tasks to complete
@@ -172,6 +176,8 @@ func (s *TaskScheduler) ShutdownGraceful(timeout time.Duration) error {
 		case <-deadline:
 			// Timeout exceeded, force clear remaining queues
 			s.queue.Clear()
+			atomic.StoreInt32(&s.metricQueued, 0)
+			s.metrics.RecordQueueDepth("TaskScheduler", 0)
 			return fmt.Errorf("shutdown graceful timeout after %v, forced clearing", timeout)
 		case <-ticker.C:
 			// Check if all work is done

@@ -96,6 +96,49 @@ func (r *ParallelTaskRunner) MaxConcurrency() int {
 	return r.maxConcurrency
 }
 
+// PendingTaskCount returns the number of queued tasks waiting to run.
+func (r *ParallelTaskRunner) PendingTaskCount() int {
+	return r.queue.Len()
+}
+
+// RunningTaskCount returns the number of currently executing tasks.
+func (r *ParallelTaskRunner) RunningTaskCount() int {
+	return int(r.runningCount.Load())
+}
+
+// Stats returns current observability data for this runner.
+func (r *ParallelTaskRunner) Stats() RunnerStats {
+	name := r.Name()
+	if name == "" {
+		name = "parallel"
+	}
+	return RunnerStats{
+		Name:           name,
+		Type:           "parallel",
+		Pending:        r.PendingTaskCount(),
+		Running:        r.RunningTaskCount(),
+		Closed:         r.IsClosed(),
+		BarrierPending: r.barrierTaskRunning.Load(),
+	}
+}
+
+func (r *ParallelTaskRunner) emitQueueDepth(depth int) {
+	type schedulerGetter interface {
+		GetScheduler() *TaskScheduler
+	}
+	if tp, ok := r.threadPool.(schedulerGetter); ok {
+		if scheduler := tp.GetScheduler(); scheduler != nil {
+			if metrics := scheduler.GetMetrics(); metrics != nil {
+				name := r.Name()
+				if name == "" {
+					name = "parallel"
+				}
+				metrics.RecordQueueDepth(name, depth)
+			}
+		}
+	}
+}
+
 // markAsBarrier marks a task ID as a barrier task.
 // Barrier tasks will wait for all running tasks to complete before executing.
 func (r *ParallelTaskRunner) markAsBarrier(id TaskID) {
@@ -176,6 +219,7 @@ func (r *ParallelTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 		}
 		// Queue and schedule (executed serially on scheduler)
 		r.queue.Push(task, traits)
+		r.emitQueueDepth(r.queue.Len())
 		r.tryScheduleInternal(ctx)
 	})
 }
@@ -351,6 +395,7 @@ func (r *ParallelTaskRunner) tryScheduleInternal(ctx context.Context) {
 		if !ok {
 			return
 		}
+		r.emitQueueDepth(r.queue.Len())
 
 		// If this is a barrier task, we need to wait for all running tasks to complete
 		// before executing it. Store it in pendingBarrierTask for later execution.
@@ -456,6 +501,7 @@ func (r *ParallelTaskRunner) WaitIdle(ctx context.Context) error {
 		// Use UserBlocking priority as barriers represent synchronization points
 		barrierID := r.queue.PushWithID(barrierTask, TaskTraits{Priority: TaskPriorityUserBlocking})
 		r.markAsBarrier(barrierID)
+		r.emitQueueDepth(r.queue.Len())
 		r.tryScheduleInternal(ctx)
 	})
 
@@ -481,6 +527,7 @@ func (r *ParallelTaskRunner) Shutdown() {
 
 		// Clear the queue
 		r.queue.Clear()
+		r.emitQueueDepth(0)
 
 		close(r.shutdownChan)
 
@@ -542,6 +589,7 @@ func (r *ParallelTaskRunner) FlushAsync(callback func()) {
 			callback()
 		}, TaskTraits{Priority: TaskPriorityUserBlocking})
 		r.markAsBarrier(barrierID)
+		r.emitQueueDepth(r.queue.Len())
 
 		r.tryScheduleInternal(ctx)
 	})

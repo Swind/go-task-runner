@@ -221,6 +221,18 @@ func (tg *GoroutineThreadPool) DelayedTaskCount() int {
 	return tg.scheduler.DelayedTaskCount()
 }
 
+// Stats returns current observability data for this pool.
+func (tg *GoroutineThreadPool) Stats() core.PoolStats {
+	return core.PoolStats{
+		ID:      tg.id,
+		Workers: tg.workers,
+		Queued:  tg.QueuedTaskCount(),
+		Active:  tg.ActiveTaskCount(),
+		Delayed: tg.DelayedTaskCount(),
+		Running: tg.IsRunning(),
+	}
+}
+
 // GetScheduler returns the underlying TaskScheduler for advanced configuration
 func (tg *GoroutineThreadPool) GetScheduler() *core.TaskScheduler {
 	return tg.scheduler

@@ -34,6 +34,29 @@ func (m *poolTestMetrics) RecordTaskRejected(runnerName string, reason string) {
 // Ensure GoroutineThreadPool fully implements ThreadPool interface
 var _ core.ThreadPool = (*GoroutineThreadPool)(nil)
 
+func TestGoroutineThreadPool_Stats(t *testing.T) {
+	pool := NewGoroutineThreadPool("stats-pool", 2)
+
+	stats := pool.Stats()
+	if stats.ID != "stats-pool" {
+		t.Fatalf("stats.ID = %q, want %q", stats.ID, "stats-pool")
+	}
+	if stats.Workers != 2 {
+		t.Fatalf("stats.Workers = %d, want 2", stats.Workers)
+	}
+	if stats.Running {
+		t.Fatal("stats.Running = true before Start, want false")
+	}
+
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	stats = pool.Stats()
+	if !stats.Running {
+		t.Fatal("stats.Running = false after Start, want true")
+	}
+}
+
 // TestGoroutineThreadPool_Lifecycle verifies pool state transitions through its lifecycle
 // Given: A newly created GoroutineThreadPool with 2 workers
 // When: The pool is started and then stopped

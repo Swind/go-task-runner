@@ -45,6 +45,7 @@ type SingleThreadTaskRunner struct {
 	queuePolicy       QueuePolicy
 	rejectionCallback RejectionCallback
 	rejectedCount     atomic.Int64
+	executingCount    atomic.Int32
 
 	// Lifecycle control
 	ctx    context.Context
@@ -120,6 +121,32 @@ func (r *SingleThreadTaskRunner) SetMetadata(key string, value any) {
 // GetThreadPool returns nil because SingleThreadTaskRunner doesn't use a thread pool
 func (r *SingleThreadTaskRunner) GetThreadPool() ThreadPool {
 	return nil
+}
+
+// PendingTaskCount returns the number of queued tasks waiting to run.
+func (r *SingleThreadTaskRunner) PendingTaskCount() int {
+	return len(r.workQueue)
+}
+
+// RunningTaskCount returns the number of tasks currently executing.
+func (r *SingleThreadTaskRunner) RunningTaskCount() int {
+	return int(r.executingCount.Load())
+}
+
+// Stats returns current observability data for this runner.
+func (r *SingleThreadTaskRunner) Stats() RunnerStats {
+	name := r.Name()
+	if name == "" {
+		name = "single-thread"
+	}
+	return RunnerStats{
+		Name:     name,
+		Type:     "single-thread",
+		Pending:  r.PendingTaskCount(),
+		Running:  r.RunningTaskCount(),
+		Rejected: r.RejectedCount(),
+		Closed:   r.IsClosed(),
+	}
 }
 
 // =============================================================================
@@ -337,7 +364,9 @@ func (r *SingleThreadTaskRunner) runLoop() {
 		case task := <-r.workQueue:
 			// Execute task and catch panics
 			func() {
+				r.executingCount.Add(1)
 				defer func() {
+					r.executingCount.Add(-1)
 					if rec := recover(); rec != nil {
 						fmt.Printf("[SingleThreadTaskRunner] Panic: %v\n", rec)
 					}

@@ -34,6 +34,10 @@ type ParallelTaskRunner = core.ParallelTaskRunner
 // RepeatingTaskHandle controls the lifecycle of a repeating task
 type RepeatingTaskHandle = core.RepeatingTaskHandle
 
+// Observability snapshot types
+type RunnerStats = core.RunnerStats
+type PoolStats = core.PoolStats
+
 // Priority constants
 const (
 	TaskPriorityBestEffort   TaskPriority = core.TaskPriorityBestEffort

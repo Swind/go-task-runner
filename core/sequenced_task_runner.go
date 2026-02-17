@@ -76,6 +76,50 @@ func (r *SequencedTaskRunner) GetThreadPool() ThreadPool {
 	return r.threadPool
 }
 
+// PendingTaskCount returns the number of queued tasks waiting to run.
+func (r *SequencedTaskRunner) PendingTaskCount() int {
+	r.queueMu.Lock()
+	defer r.queueMu.Unlock()
+	return r.queue.Len()
+}
+
+// RunningTaskCount returns 1 if runLoop is running/scheduled, otherwise 0.
+func (r *SequencedTaskRunner) RunningTaskCount() int {
+	return int(atomic.LoadInt32(&r.runningCount))
+}
+
+// Stats returns current observability data for this runner.
+func (r *SequencedTaskRunner) Stats() RunnerStats {
+	name := r.Name()
+	if name == "" {
+		name = "sequenced"
+	}
+	return RunnerStats{
+		Name:    name,
+		Type:    "sequenced",
+		Pending: r.PendingTaskCount(),
+		Running: r.RunningTaskCount(),
+		Closed:  r.IsClosed(),
+	}
+}
+
+func (r *SequencedTaskRunner) emitQueueDepth(depth int) {
+	type schedulerGetter interface {
+		GetScheduler() *TaskScheduler
+	}
+	if tp, ok := r.threadPool.(schedulerGetter); ok {
+		if scheduler := tp.GetScheduler(); scheduler != nil {
+			if metrics := scheduler.GetMetrics(); metrics != nil {
+				name := r.Name()
+				if name == "" {
+					name = "sequenced"
+				}
+				metrics.RecordQueueDepth(name, depth)
+			}
+		}
+	}
+}
+
 // =============================================================================
 // Core Task Execution
 // =============================================================================
@@ -132,7 +176,11 @@ func (r *SequencedTaskRunner) runLoop(ctx context.Context) {
 	// 1. Fetch one task
 	r.queueMu.Lock()
 	item, ok := r.queue.Pop()
+	depth := r.queue.Len()
 	r.queueMu.Unlock()
+	if ok {
+		r.emitQueueDepth(depth)
+	}
 
 	if !ok {
 		// Queue is empty, go idle
@@ -198,7 +246,9 @@ func (r *SequencedTaskRunner) PostTaskWithTraits(task Task, traits TaskTraits) {
 
 	r.queueMu.Lock()
 	r.queue.Push(task, traits)
+	depth := r.queue.Len()
 	r.queueMu.Unlock()
+	r.emitQueueDepth(depth)
 
 	r.ensureRunning(traits)
 }
@@ -327,6 +377,7 @@ func (r *SequencedTaskRunner) Shutdown() {
 		r.queueMu.Lock()
 		r.queue = NewFIFOTaskQueue()
 		r.queueMu.Unlock()
+		r.emitQueueDepth(0)
 	})
 }
 

@@ -179,9 +179,36 @@ func TestTaskScheduler_Shutdown(t *testing.T) {
 	s.PostInternal(noop, DefaultTaskTraits())
 
 	gotQueued = s.QueuedTaskCount()
-	wantQueued = 1
+	wantQueued = 0
 	if gotQueued != wantQueued {
-		t.Errorf("after shutdown: QueuedTaskCount: got = %d, want = %d (task rejected)", gotQueued, wantQueued)
+		t.Errorf("after shutdown: QueuedTaskCount: got = %d, want = %d (queue cleared, task rejected)", gotQueued, wantQueued)
+	}
+}
+
+// TestTaskScheduler_QueueDepthMetrics verifies queue depth metrics are emitted on queue transitions.
+func TestTaskScheduler_QueueDepthMetrics(t *testing.T) {
+	metrics := NewTestMetrics()
+	config := &TaskSchedulerConfig{Metrics: metrics}
+	s := NewFIFOTaskSchedulerWithConfig(1, config)
+	defer s.Shutdown()
+
+	noop := func(ctx context.Context) {}
+	s.PostInternal(noop, DefaultTaskTraits()) // depth 1
+	s.PostInternal(noop, DefaultTaskTraits()) // depth 2
+
+	stopCh := make(chan struct{})
+	_, _ = s.GetWork(stopCh) // depth 1
+
+	s.Shutdown() // depth 0
+
+	got := metrics.GetQueueDepths()
+	if len(got) < 4 {
+		t.Fatalf("expected at least 4 queue depth samples, got %d", len(got))
+	}
+
+	last := got[len(got)-1]
+	if last.Depth != 0 {
+		t.Fatalf("last queue depth = %d, want 0", last.Depth)
 	}
 }
 
