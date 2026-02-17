@@ -329,6 +329,7 @@ See [docs/JOB_MANAGER.md](docs/JOB_MANAGER.md) for architecture details.
 - [examples/mixed_priority](examples/mixed_priority/main.go): priority behavior across competing runners.
 - [examples/shutdown](examples/shutdown/main.go): runner lifecycle and shutdown behavior.
 - [examples/custom_handlers](examples/custom_handlers/main.go): custom panic/metrics/rejection handlers.
+- [examples/custom_metrics_dump](examples/custom_metrics_dump/main.go): in-process metrics collector and JSON dump without Prometheus.
 - [examples/event_bus](examples/event_bus/main.go): sequenced-runner event bus pattern.
 - [examples/parallel_tasks](examples/parallel_tasks/main.go): parallel runner features and concurrency limits.
 - [examples/prometheus_metrics](examples/prometheus_metrics/main.go): Prometheus exporter and snapshot polling.
