@@ -236,7 +236,29 @@ Gracefully shutdown a runner to stop all tasks:
 
 See [examples/shutdown](examples/shutdown/main.go) for more examples.
 
-### 6. JobManager (Durable Ack + Pluggable Store)
+### 6. Observability with Prometheus
+
+You can bridge built-in runtime metrics to Prometheus without changing task APIs:
+
+```go
+import (
+    obs "github.com/Swind/go-task-runner/observability/prometheus"
+    prom "github.com/prometheus/client_golang/prometheus"
+)
+
+reg := prom.NewRegistry()
+exporter, _ := obs.NewMetricsExporter("taskrunner", reg, obs.ExporterOptions{})
+```
+
+Use `TaskSchedulerConfig.Metrics = exporter` to export:
+- task duration histogram
+- task panic/rejection counters
+- queue depth gauges
+
+For runner/pool `Stats()` snapshots, attach `SnapshotPoller`.
+See [examples/prometheus_metrics](examples/prometheus_metrics/main.go).
+
+### 7. JobManager (Durable Ack + Pluggable Store)
 
 `JobManager` is implemented in the `core` package for durable job workflows.
 
@@ -299,6 +321,7 @@ See [docs/JOB_MANAGER.md](docs/JOB_MANAGER.md) for architecture details.
 - [examples/custom_handlers](examples/custom_handlers/main.go): custom panic/metrics/rejection handlers.
 - [examples/event_bus](examples/event_bus/main.go): sequenced-runner event bus pattern.
 - [examples/parallel_tasks](examples/parallel_tasks/main.go): parallel runner features and concurrency limits.
+- [examples/prometheus_metrics](examples/prometheus_metrics/main.go): Prometheus exporter and snapshot polling.
 
 ## Architecture
 
