@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
 	"github.com/Swind/go-task-runner/core"
 	obs "github.com/Swind/go-task-runner/observability/prometheus"
 	prom "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -42,20 +44,32 @@ func main() {
 	poller.Start(context.Background())
 	defer poller.Stop()
 
-	runner.PostTaskNamed("quick-task", func(ctx context.Context) {
-		time.Sleep(5 * time.Millisecond)
-	})
-	runner.PostTask(func(ctx context.Context) {
-		time.Sleep(2 * time.Millisecond)
-	})
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	server := &http.Server{Addr: ":2112", Handler: mux}
+
+	go func() {
+		_ = server.ListenAndServe()
+	}()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}()
+
+	for i := range 8 {
+		runner.PostTaskNamed(fmt.Sprintf("demo-task-%d", i), func(ctx context.Context) {
+			time.Sleep(5 * time.Millisecond)
+		})
+	}
 
 	if err := runner.WaitIdle(context.Background()); err != nil {
 		panic(err)
 	}
 
-	mf, err := reg.Gather()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("exported metric families: %d\n", len(mf))
+	fmt.Println("Prometheus endpoint is up at http://127.0.0.1:2112/metrics")
+	fmt.Println("Try: curl -s http://127.0.0.1:2112/metrics | grep '^taskrunner_'")
+
+	// Keep demo alive briefly so local users can scrape metrics.
+	time.Sleep(2 * time.Second)
 }

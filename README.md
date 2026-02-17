@@ -258,6 +258,16 @@ Use `TaskSchedulerConfig.Metrics = exporter` to export:
 For runner/pool `Stats()` snapshots, attach `SnapshotPoller`.
 See [examples/prometheus_metrics](examples/prometheus_metrics/main.go).
 
+Quick local check:
+
+```bash
+go run ./examples/prometheus_metrics
+curl -s http://127.0.0.1:2112/metrics | grep '^taskrunner_'
+```
+
+Metrics usage notes and PromQL snippets:
+- [examples/prometheus_metrics/README.md](examples/prometheus_metrics/README.md)
+
 ### 7. JobManager (Durable Ack + Pluggable Store)
 
 `JobManager` is implemented in the `core` package for durable job workflows.
