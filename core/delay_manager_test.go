@@ -302,3 +302,34 @@ func TestDelayManager_AccurateTiming(t *testing.T) {
 		t.Errorf("elapsed delay = %v, want %v±20ms", elapsed, delay)
 	}
 }
+
+// TestDelayManager_ExpiredTasksWithoutWakeup verifies expired tasks are not treated as empty queue.
+// Given: A delay manager with a task that is already expired
+// When: The loop computes next run state
+// Then: The task executes promptly even without additional wakeup signals.
+func TestDelayManager_ExpiredTasksWithoutWakeup(t *testing.T) {
+	dm := core.NewDelayManager()
+	defer dm.Stop()
+
+	pool := taskrunner.NewGoroutineThreadPool("test", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+	defer runner.Shutdown()
+
+	done := make(chan struct{})
+	dm.AddDelayedTask(func(ctx context.Context) {
+		close(done)
+	}, 1*time.Millisecond, core.DefaultTaskTraits(), runner)
+
+	// Wait until the task becomes expired in the queue, then expect prompt execution.
+	time.Sleep(15 * time.Millisecond)
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expired task was not executed promptly")
+	}
+}

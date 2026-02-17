@@ -59,6 +59,14 @@ type DelayManager struct {
 	cancel context.CancelFunc
 }
 
+type delayNextRunState int
+
+const (
+	delayStateEmpty delayNextRunState = iota
+	delayStateExpiredNow
+	delayStateFuture
+)
+
 func NewDelayManager() *DelayManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	dm := &DelayManager{
@@ -95,52 +103,50 @@ func (dm *DelayManager) AddDelayedTask(task Task, delay time.Duration, traits Ta
 func (dm *DelayManager) loop() {
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
+	defer timer.Stop()
 
 	for {
-		// Calculate next run time
-		nextRun := dm.calculateNextRun()
-		if nextRun == 0 {
-			// No tasks, wait indefinitely
+		// Distinguish empty queue from already-expired tasks.
+		nextRun, state := dm.calculateNextRun()
+		if state == delayStateExpiredNow {
+			dm.processExpiredTasks()
+			continue
+		}
+		if state == delayStateEmpty {
 			nextRun = 1000 * time.Hour
 		}
 
+		stopAndDrainTimer(timer)
 		timer.Reset(nextRun)
 
 		select {
 		case <-dm.ctx.Done():
-			timer.Stop()
 			return
 		case <-timer.C:
 			// Timer fired, process all expired tasks in one go
 			dm.processExpiredTasks()
 		case <-dm.wakeup:
-			// New task added, need to recalculate
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			// New task added, recalculate schedule in next loop iteration.
 		}
 	}
 }
 
 // calculateNextRun determines how long to wait until the next task
-// Returns 0 if there are tasks that should run immediately
-func (dm *DelayManager) calculateNextRun() time.Duration {
+// and whether the queue is empty, expired-now, or future.
+func (dm *DelayManager) calculateNextRun() (time.Duration, delayNextRunState) {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 
 	item := dm.pq.Peek()
 	if item == nil {
-		return 0 // No tasks
+		return 0, delayStateEmpty
 	}
 
 	now := time.Now()
-	if item.RunAt.Before(now) {
-		return 0 // Already expired
+	if !item.RunAt.After(now) {
+		return 0, delayStateExpiredNow
 	}
-	return item.RunAt.Sub(now)
+	return item.RunAt.Sub(now), delayStateFuture
 }
 
 // processExpiredTasks processes all tasks that have expired
@@ -184,4 +190,13 @@ func (dm *DelayManager) TaskCount() int {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 	return len(dm.pq)
+}
+
+func stopAndDrainTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }
