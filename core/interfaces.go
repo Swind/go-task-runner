@@ -32,10 +32,10 @@ type DefaultPanicHandler struct{}
 // HandlePanic prints panic information to stdout.
 func (h *DefaultPanicHandler) HandlePanic(ctx context.Context, runnerName string, workerID int, panicInfo any, stackTrace []byte) {
 	if workerID >= 0 {
-		fmt.Printf("[Worker %d @ %s] Panic: %v\nStack trace:\n%s",
+		fmt.Printf("[Worker %d @ %s] Panic: %v\nStack trace:\n%s\n",
 			workerID, runnerName, panicInfo, stackTrace)
 	} else {
-		fmt.Printf("[Runner %s] Panic: %v\nStack trace:\n%s",
+		fmt.Printf("[Runner %s] Panic: %v\nStack trace:\n%s\n",
 			runnerName, panicInfo, stackTrace)
 	}
 }
@@ -126,7 +126,7 @@ type DefaultRejectedTaskHandler struct{}
 
 // HandleRejectedTask logs the rejected task.
 func (h *DefaultRejectedTaskHandler) HandleRejectedTask(runnerName string, reason string) {
-	fmt.Printf("[Runner %s] Task rejected: %s", runnerName, reason)
+	fmt.Printf("[Runner %s] Task rejected: %s\n", runnerName, reason)
 }
 
 // =============================================================================

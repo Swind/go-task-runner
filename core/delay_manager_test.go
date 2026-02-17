@@ -18,7 +18,7 @@ import (
 // TestDelayManager_BatchProcessing verifies batch processing of simultaneously expiring tasks
 // Given: A DelayManager with 100 tasks expiring at approximately the same time
 // When: All tasks expire and are processed
-// Then: All tasks execute correctly within 300ms
+// Then: All tasks execute correctly within timeout window
 func TestDelayManager_BatchProcessing(t *testing.T) {
 	// Arrange
 	dm := core.NewDelayManager()
@@ -41,14 +41,17 @@ func TestDelayManager_BatchProcessing(t *testing.T) {
 		dm.AddDelayedTask(task, 100*time.Millisecond, core.DefaultTaskTraits(), runner)
 	}
 
-	// Wait for execution
-	time.Sleep(300 * time.Millisecond)
-
-	// Assert - Most tasks executed (allow timing tolerance)
-	count := executed.Load()
-	if count < 90 {
-		t.Errorf("executed tasks = %d, want ~100", count)
+	// Wait until all tasks complete or timeout.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if executed.Load() == 100 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	count := executed.Load()
+	t.Errorf("executed tasks = %d, want 100 within timeout", count)
 }
 
 // TestDelayManager_ConcurrentAdd verifies thread safety during concurrent task additions

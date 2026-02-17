@@ -117,18 +117,6 @@ func (m *JobManager) getRetryPolicyLocked() RetryPolicy {
 	return m.retryPolicy
 }
 
-func (m *JobManager) getLoggerLocked() Logger {
-	m.cfgMu.RLock()
-	defer m.cfgMu.RUnlock()
-	return m.logger
-}
-
-func (m *JobManager) getErrorHandlerLocked() ErrorHandler {
-	m.cfgMu.RLock()
-	defer m.cfgMu.RUnlock()
-	return m.errorHandler
-}
-
 func (m *JobManager) getRuntimeConfigSnapshotLocked() runtimeConfigSnapshot {
 	m.cfgMu.RLock()
 	defer m.cfgMu.RUnlock()
