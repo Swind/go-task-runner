@@ -262,16 +262,6 @@ func (r *SingleThreadTaskRunner) PostDelayedTask(task Task, delay time.Duration)
 // Uses time.AfterFunc which is independent of the global TaskScheduler,
 // ensuring IO-related timers are not affected by scheduler load.
 func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits) {
-	r.PostDelayedTaskWithTraitsNamed("", task, delay, traits)
-}
-
-// PostDelayedTaskNamed submits a delayed named task.
-func (r *SingleThreadTaskRunner) PostDelayedTaskNamed(name string, task Task, delay time.Duration) {
-	r.PostDelayedTaskWithTraitsNamed(name, task, delay, DefaultTaskTraits())
-}
-
-// PostDelayedTaskWithTraitsNamed submits a delayed named task with traits.
-func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraitsNamed(name string, task Task, delay time.Duration, traits TaskTraits) {
 	if r.closed.Load() {
 		return
 	}
