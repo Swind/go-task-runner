@@ -160,6 +160,44 @@ func TestPostTaskAndReply_NilReplyRunner(t *testing.T) {
 	}
 }
 
+// TestPostTaskAndReply_NilReplyRunner_PanicRecovered verifies panic recovery with nil replyRunner
+// Given: A target runner with custom panic handler and nil reply runner
+// When: PostTaskAndReply is called with a task that panics and nil replyRunner
+// Then: Panic is recovered by the panic handler and reply does not execute
+func TestPostTaskAndReply_NilReplyRunner_PanicRecovered(t *testing.T) {
+	// Arrange
+	panicHandler := NewTestPanicHandler()
+	pool := newSchedulerTestPool(&TaskSchedulerConfig{PanicHandler: panicHandler})
+	pool.start()
+	defer pool.stop()
+
+	targetRunner := NewSequencedTaskRunner(pool)
+	var replyCalled atomic.Bool
+
+	// Act
+	targetRunner.PostTaskAndReply(
+		func(ctx context.Context) {
+			panic("nil reply boom")
+		},
+		func(ctx context.Context) {
+			replyCalled.Store(true)
+		},
+		nil,
+	)
+
+	if err := targetRunner.WaitIdle(context.Background()); err != nil {
+		t.Fatalf("WaitIdle failed: %v", err)
+	}
+
+	// Assert
+	if panicHandler.CallCount() != 1 {
+		t.Errorf("panic handler call count = %d, want 1", panicHandler.CallCount())
+	}
+	if replyCalled.Load() {
+		t.Error("reply should not execute when replyRunner is nil")
+	}
+}
+
 // =============================================================================
 // PostTaskAndReplyWithTraits Tests
 // =============================================================================
@@ -695,5 +733,142 @@ func TestSingleThreadTaskRunner_PostTaskAndReplyWithTraits(t *testing.T) {
 	}
 	if !replyExecuted.Load() {
 		t.Error("reply executed = false, want true")
+	}
+}
+
+// =============================================================================
+// Panic Recovery Helper Tests
+// =============================================================================
+
+type schedulerTestPool struct {
+	scheduler *TaskScheduler
+	ctx       context.Context
+	cancel    context.CancelFunc
+}
+
+func newSchedulerTestPool(config *TaskSchedulerConfig) *schedulerTestPool {
+	return &schedulerTestPool{
+		scheduler: NewFIFOTaskSchedulerWithConfig(2, config),
+	}
+}
+
+func (tp *schedulerTestPool) GetScheduler() *TaskScheduler { return tp.scheduler }
+
+func (tp *schedulerTestPool) start() {
+	tp.ctx, tp.cancel = context.WithCancel(context.Background())
+	for i := 0; i < 2; i++ {
+		go tp.worker()
+	}
+}
+
+func (tp *schedulerTestPool) worker() {
+	for {
+		item, ok := tp.scheduler.GetWork(tp.ctx.Done())
+		if !ok {
+			return
+		}
+		tp.scheduler.OnTaskStart()
+		func() {
+			defer tp.scheduler.OnTaskEnd()
+			item.Task(tp.ctx)
+		}()
+	}
+}
+
+func (tp *schedulerTestPool) stop() {
+	tp.scheduler.Shutdown()
+	if tp.cancel != nil {
+		tp.cancel()
+	}
+}
+
+func (tp *schedulerTestPool) PostInternal(task Task, traits TaskTraits) {
+	tp.scheduler.PostInternal(task, traits)
+}
+
+func (tp *schedulerTestPool) PostDelayedInternal(task Task, delay time.Duration, traits TaskTraits, target TaskRunner) {
+	tp.scheduler.PostDelayedInternal(task, delay, traits, target)
+}
+
+func (tp *schedulerTestPool) Start(ctx context.Context) {}
+func (tp *schedulerTestPool) Stop()                     {}
+func (tp *schedulerTestPool) ID() string                { return "test-pool" }
+func (tp *schedulerTestPool) IsRunning() bool           { return true }
+func (tp *schedulerTestPool) WorkerCount() int          { return 2 }
+func (tp *schedulerTestPool) QueuedTaskCount() int      { return tp.scheduler.QueuedTaskCount() }
+func (tp *schedulerTestPool) ActiveTaskCount() int      { return tp.scheduler.ActiveTaskCount() }
+func (tp *schedulerTestPool) DelayedTaskCount() int     { return tp.scheduler.DelayedTaskCount() }
+
+func TestPostDelayedTaskAndReplyWithResult_PanicUsesHandler(t *testing.T) {
+	// Arrange
+	panicHandler := NewTestPanicHandler()
+	pool := newSchedulerTestPool(&TaskSchedulerConfig{PanicHandler: panicHandler})
+	pool.start()
+	defer pool.stop()
+
+	targetRunner := NewSequencedTaskRunner(pool)
+	replyRunner := NewSequencedTaskRunner(pool)
+	var replyExecuted atomic.Bool
+
+	// Act
+	PostDelayedTaskAndReplyWithResult(
+		targetRunner,
+		func(ctx context.Context) (int, error) {
+			panic("delayed boom")
+		},
+		10*time.Millisecond,
+		func(ctx context.Context, result int, err error) {
+			replyExecuted.Store(true)
+		},
+		replyRunner,
+	)
+
+	time.Sleep(100 * time.Millisecond)
+	if err := targetRunner.WaitIdle(context.Background()); err != nil {
+		t.Fatalf("WaitIdle failed: %v", err)
+	}
+
+	// Assert
+	if panicHandler.CallCount() != 1 {
+		t.Errorf("panic handler call count = %d, want 1", panicHandler.CallCount())
+	}
+	if replyExecuted.Load() {
+		t.Error("reply should not execute after task panic")
+	}
+}
+
+func TestPostTaskAndReplyWithResult_PanicUsesHandler(t *testing.T) {
+	// Arrange
+	panicHandler := NewTestPanicHandler()
+	pool := newSchedulerTestPool(&TaskSchedulerConfig{PanicHandler: panicHandler})
+	pool.start()
+	defer pool.stop()
+
+	targetRunner := NewSequencedTaskRunner(pool)
+	replyRunner := NewSequencedTaskRunner(pool)
+	var replyExecuted atomic.Bool
+
+	// Act
+	PostTaskAndReplyWithResult(
+		targetRunner,
+		func(ctx context.Context) (int, error) {
+			panic("normal boom")
+		},
+		func(ctx context.Context, result int, err error) {
+			replyExecuted.Store(true)
+		},
+		replyRunner,
+	)
+
+	if err := targetRunner.WaitIdle(context.Background()); err != nil {
+		t.Fatalf("WaitIdle failed: %v", err)
+	}
+
+	// Assert
+	if panicHandler.CallCount() != 1 {
+		t.Errorf("panic handler call count = %d, want 1", panicHandler.CallCount())
+	}
+	if replyExecuted.Load() {
+		t.Error("reply should not execute after task panic")
 	}
 }

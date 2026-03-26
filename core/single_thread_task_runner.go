@@ -450,7 +450,7 @@ func (h *singleThreadRepeatingHandle) createRepeatingTask() Task {
 // If task panics, reply will not be executed.
 // Both task and reply will execute on the same dedicated goroutine if replyRunner is this runner.
 func (r *SingleThreadTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {
-	postTaskAndReplyInternal(r, task, reply, replyRunner, DefaultTaskTraits())
+	postTaskAndReplyInternal(r, task, DefaultTaskTraits(), reply, replyRunner)
 }
 
 // PostTaskAndReplyWithTraits allows specifying different traits for task and reply.

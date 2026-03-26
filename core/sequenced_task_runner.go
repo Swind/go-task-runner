@@ -419,7 +419,7 @@ func (r *SequencedTaskRunner) IsClosed() bool {
 // PostTaskAndReply executes task on this runner, then posts reply to replyRunner.
 // If task panics, reply will not be executed.
 func (r *SequencedTaskRunner) PostTaskAndReply(task Task, reply Task, replyRunner TaskRunner) {
-	postTaskAndReplyInternal(r, task, reply, replyRunner, DefaultTaskTraits())
+	postTaskAndReplyInternal(r, task, DefaultTaskTraits(), reply, replyRunner)
 }
 
 // PostTaskAndReplyWithTraits allows specifying different traits for task and reply.

@@ -3,19 +3,65 @@ package core
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 )
+
+// =============================================================================
+// Panic Recovery Helpers
+// =============================================================================
+
+type panicRecoveryContext struct {
+	handler    PanicHandler
+	metrics    Metrics
+	runnerName string
+	workerID   int
+}
+
+func getPanicRecovery(tp ThreadPool, runnerName string) panicRecoveryContext {
+	if tp == nil {
+		return panicRecoveryContext{}
+	}
+	type schedulerAccessor interface {
+		GetScheduler() *TaskScheduler
+	}
+	sa, ok := tp.(schedulerAccessor)
+	if !ok || sa.GetScheduler() == nil {
+		return panicRecoveryContext{}
+	}
+	return panicRecoveryContext{
+		handler:    sa.GetScheduler().GetPanicHandler(),
+		metrics:    sa.GetScheduler().GetMetrics(),
+		runnerName: runnerName,
+		workerID:   -1,
+	}
+}
+
+func executeTaskWithRecovery(ctx context.Context, task Task, prc panicRecoveryContext) (panicked bool) {
+	panicked = true
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if prc.handler != nil {
+					prc.handler.HandlePanic(ctx, prc.runnerName, prc.workerID, r, debug.Stack())
+				} else {
+					fmt.Printf("[TaskAndReply] Task panicked, reply will not run: %v\n", r)
+				}
+				if prc.metrics != nil {
+					prc.metrics.RecordTaskPanic(prc.runnerName, r)
+				}
+			}
+		}()
+		task(ctx)
+		panicked = false
+	}()
+	return panicked
+}
 
 // =============================================================================
 // PostTaskAndReply Internal Helpers
 // =============================================================================
 
-// postTaskAndReplyInternalWithTraits is the core implementation for PostTaskAndReply pattern.
-// It wraps the task and reply to ensure proper execution order:
-// 1. Execute task on targetRunner
-// 2. If task completes successfully (no panic), post reply to replyRunner
-//
-// This function allows specifying different traits for task and reply separately.
 func postTaskAndReplyInternalWithTraits(
 	targetRunner TaskRunner,
 	task Task,
@@ -24,29 +70,18 @@ func postTaskAndReplyInternalWithTraits(
 	replyTraits TaskTraits,
 	replyRunner TaskRunner,
 ) {
+	prc := getPanicRecovery(targetRunner.GetThreadPool(), targetRunner.Name())
+
 	if replyRunner == nil {
-		// No reply runner specified, just execute the task
-		targetRunner.PostTaskWithTraits(task, taskTraits)
+		wrappedTask := func(ctx context.Context) {
+			executeTaskWithRecovery(ctx, task, prc)
+		}
+		targetRunner.PostTaskWithTraits(wrappedTask, taskTraits)
 		return
 	}
 
 	wrappedTask := func(ctx context.Context) {
-		// Track whether task panicked
-		panicked := true
-
-		// Execute task with panic recovery
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Printf("[TaskAndReply] Task panicked, reply will not run: %v\n", r)
-				}
-			}()
-			task(ctx)
-			panicked = false
-		}()
-
-		// If task completed successfully, post reply to replyRunner
-		if !panicked {
+		if !executeTaskWithRecovery(ctx, task, prc) {
 			replyRunner.PostTaskWithTraits(reply, replyTraits)
 		}
 	}
@@ -54,20 +89,19 @@ func postTaskAndReplyInternalWithTraits(
 	targetRunner.PostTaskWithTraits(wrappedTask, taskTraits)
 }
 
-// postTaskAndReplyInternal is a simplified version that uses the same traits for both task and reply.
 func postTaskAndReplyInternal(
 	targetRunner TaskRunner,
 	task Task,
+	taskTraits TaskTraits,
 	reply Task,
 	replyRunner TaskRunner,
-	traits TaskTraits,
 ) {
 	postTaskAndReplyInternalWithTraits(
 		targetRunner,
 		task,
-		traits,
+		taskTraits,
 		reply,
-		DefaultTaskTraits(), // Reply uses default traits
+		DefaultTaskTraits(),
 		replyRunner,
 	)
 }
@@ -237,20 +271,8 @@ func PostDelayedTaskAndReplyWithResultAndTraits[T any](
 
 	// Create a delayed task that will execute task then reply
 	delayedWrapper := func(ctx context.Context) {
-		// Execute task
-		panicked := true
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Printf("[DelayedTaskAndReply] Task panicked: %v\n", r)
-				}
-			}()
-			wrappedTask(ctx)
-			panicked = false
-		}()
-
-		// Post reply if task succeeded
-		if !panicked && replyRunner != nil {
+		prc := getPanicRecovery(targetRunner.GetThreadPool(), targetRunner.Name())
+		if !executeTaskWithRecovery(ctx, wrappedTask, prc) && replyRunner != nil {
 			replyRunner.PostTaskWithTraits(wrappedReply, replyTraits)
 		}
 	}
