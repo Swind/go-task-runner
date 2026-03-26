@@ -8,6 +8,7 @@ Experimental Go library implementing a multi-threaded programming architecture i
 
 - Root package (`pool.go`, `types.go`, `doc.go`) — public API; re-exports core types via type aliases
 - `core/` — internal scheduler, queue, runner, job-manager implementations
+- `job/` — job lifecycle management (JobManager, JobStore, JobSerializer, Logger, RetryPolicy)
 - `observability/prometheus/` — Prometheus metrics exporter and snapshot poller
 - `examples/` — runnable demos (each subdirectory has a `main.go`)
 - `docs/` — architecture and subsystem docs
@@ -30,6 +31,7 @@ go test -tags=ci -v -coverprofile=coverage.out ./...
 
 # Run tests for a specific package
 go test ./core/...
+go test ./job/...
 go test ./observability/prometheus/...
 
 # Run a single test by name
@@ -63,13 +65,14 @@ find examples -name "main.go" | sort | xargs -n1 go run
 
 - Group imports into three blocks: stdlib, external, internal (this project)
 - Use `core "github.com/Swind/go-task-runner/core"` when importing from root package tests
+- Use `job "github.com/Swind/go-task-runner/job"` when importing the job package from tests
 - Use `taskrunner "github.com/Swind/go-task-runner"` when importing the root package from tests
 
 ## Types & Naming
 
 - Exported identifiers: `PascalCase`; unexported: `camelCase`
 - Prefer clear, domain-specific names: `TaskRunner`, `JobManager`, `DelayManager`, `TaskScheduler`
-- Use type aliases (`type X = core.X`) in root package for re-exports
+- Use type aliases (`type X = core.X`) in root package for re-exports; job types (JobManager, JobStore, etc.) live in `job/` and are NOT re-exported from root
 - Interfaces: name with `-er` suffix (`TaskRunner`, `PanicHandler`, `Metrics`, `ThreadPool`)
 - Constructor functions: `NewXxx()` or `NewXxxWithConfig()`
 - Constants: `PascalCase` for exported, `camelCase` for unexported
