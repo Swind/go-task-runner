@@ -333,3 +333,30 @@ func TestDelayManager_ExpiredTasksWithoutWakeup(t *testing.T) {
 		t.Fatal("expired task was not executed promptly")
 	}
 }
+
+func TestDelayManager_StopPreventsTaskExecution(t *testing.T) {
+	// Arrange
+	dm := core.NewDelayManager()
+
+	pool := taskrunner.NewGoroutineThreadPool("test", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+	defer runner.Shutdown()
+
+	var executed atomic.Bool
+
+	dm.AddDelayedTask(func(ctx context.Context) {
+		executed.Store(true)
+	}, 500*time.Millisecond, core.DefaultTaskTraits(), runner)
+
+	// Act
+	dm.Stop()
+
+	// Assert
+	time.Sleep(700 * time.Millisecond)
+	if executed.Load() {
+		t.Error("task should not execute after Stop()")
+	}
+}

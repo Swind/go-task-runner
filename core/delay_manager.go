@@ -57,6 +57,7 @@ type DelayManager struct {
 	wakeup chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type delayNextRunState int
@@ -74,6 +75,7 @@ func NewDelayManager() *DelayManager {
 		wakeup: make(chan struct{}, 1),
 		ctx:    ctx,
 		cancel: cancel,
+		done:   make(chan struct{}),
 	}
 	heap.Init(&dm.pq)
 	go dm.loop()
@@ -104,6 +106,7 @@ func (dm *DelayManager) loop() {
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	defer timer.Stop()
+	defer close(dm.done)
 
 	for {
 		// Distinguish empty queue from already-expired tasks.
@@ -178,8 +181,8 @@ func (dm *DelayManager) processExpiredTasks() {
 
 func (dm *DelayManager) Stop() {
 	dm.cancel()
+	<-dm.done
 
-	// Clear pq to release all TaskRunner references
 	dm.mu.Lock()
 	dm.pq = make(DelayedTaskHeap, 0)
 	heap.Init(&dm.pq)
