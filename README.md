@@ -236,9 +236,22 @@ Gracefully shutdown a runner to stop all tasks:
 
 See [examples/shutdown](examples/shutdown/main.go) for more examples.
 
-### 6. Observability with Prometheus
+### 6. Observability
 
-You can bridge built-in runtime metrics to Prometheus without changing task APIs:
+#### Metrics Interface
+
+The `core.Metrics` interface defines four event-driven methods. Implementations are injected via `TaskSchedulerConfig.Metrics` and called automatically as tasks execute — no task API changes needed.
+
+| Method | Trigger | `runnerName` value |
+|---|---|---|
+| `RecordTaskDuration(runnerName, priority, duration)` | Task completes in pool `workerLoop` | Pool ID (e.g. `"metrics-pool"`) |
+| `RecordTaskPanic(runnerName, panicInfo)` | Task panics in runner `runLoop` **and** pool `workerLoop` (recorded twice) | Runner name (e.g. `"metrics-seq"`) + pool ID |
+| `RecordQueueDepth(runnerName, depth)` | Scheduler enqueue/dequeue/shutdown + runner queue changes via `emitQueueDepth` | `"TaskScheduler"` (scheduler queue) + runner name (runner queue) |
+| `RecordTaskRejected(runnerName, reason)` | Task posted while scheduler is shutting down | `"TaskScheduler"` |
+
+#### Prometheus Exporter
+
+`MetricsExporter` adapts `core.Metrics` to Prometheus collectors:
 
 ```go
 import (
@@ -247,25 +260,71 @@ import (
 )
 
 reg := prom.NewRegistry()
-exporter, _ := obs.NewMetricsExporter("taskrunner", reg, obs.ExporterOptions{})
+exporter, _ := obs.NewMetricsExporter("taskrunner", reg, obs.ExporterOptions{
+    DurationBuckets: []float64{.005, .01, .025, .05, .075, .1, .25, .5, 1, 2.5, 5, 10},
+})
 ```
 
-Use `TaskSchedulerConfig.Metrics = exporter` to export:
-- task duration histogram
-- task panic/rejection counters
-- queue depth gauges
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `<ns>_task_duration_seconds` | Histogram | `runner`, `priority` | Task execution wall-clock time |
+| `<ns>_task_panic_total` | Counter | `runner` | Cumulative panic count |
+| `<ns>_task_rejected_total` | Counter | `runner`, `reason` | Cumulative rejection count |
+| `<ns>_queue_depth` | Gauge | `runner` | Current queue depth (real-time) |
 
-See [examples/prometheus_metrics](examples/prometheus_metrics/main.go) for a full wiring example.
+**Priority label values:** `user_blocking`, `user_visible`, `best_effort`, `unknown`
 
-Quick local check:
+**`runner` label values:**
+
+| Label | Source |
+|---|---|
+| `TaskScheduler` | Scheduler-level priority queue (enqueue/dequeue/shutdown) |
+| Pool ID (e.g. `metrics-pool`) | Task duration and panic recorded at pool level |
+| Runner name (e.g. `metrics-seq`) | Queue depth and panic recorded at runner level |
+
+**PromQL examples:**
+
+```promql
+sum(rate(taskrunner_task_duration_seconds_count[5m])) by (runner)
+max(taskrunner_queue_depth) by (runner)
+rate(taskrunner_task_panic_total[5m])
+```
+
+#### Stats() Introspection
+
+`RunnerStats` and `PoolStats` are available for on-demand inspection via `runner.Stats()` and `pool.Stats()`. These are **not** automatically exported to Prometheus — use them for debugging or custom monitoring.
+
+**`RunnerStats`**
+
+| Field | Type | Description |
+|---|---|---|
+| `Name` | `string` | Runner display name |
+| `Type` | `string` | `"sequenced"`, `"parallel"`, or `"single-thread"` |
+| `Pending` | `int` | Tasks waiting in runner queue |
+| `Running` | `int` | Tasks currently executing (0 or 1 for sequenced/single-thread) |
+| `Rejected` | `int64` | Cumulative rejection count |
+| `Closed` | `bool` | Whether `Shutdown()` has been called |
+| `BarrierPending` | `bool` | Whether a barrier task is waiting (parallel only) |
+
+**`PoolStats`**
+
+| Field | Type | Description |
+|---|---|---|
+| `ID` | `string` | Pool identifier |
+| `Workers` | `int` | Number of worker goroutines |
+| `Queued` | `int` | Tasks in scheduler queue |
+| `Active` | `int` | Tasks currently executing |
+| `Delayed` | `int` | Tasks waiting for delayed execution |
+| `Running` | `bool` | Whether pool is running |
+
+#### Quick Start
 
 ```bash
 go run ./examples/prometheus_metrics
 curl -s http://127.0.0.1:2112/metrics | grep '^taskrunner_'
 ```
 
-Metrics usage notes and PromQL snippets:
-- [examples/prometheus_metrics/README.md](examples/prometheus_metrics/README.md)
+See [examples/prometheus_metrics](examples/prometheus_metrics/main.go) for a full wiring example.
 
 ### 7. JobManager (Durable Ack + Pluggable Store)
 

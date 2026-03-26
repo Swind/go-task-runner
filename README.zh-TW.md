@@ -221,6 +221,96 @@ if runner.IsClosed() {
 - [`examples/event_bus/main.go`](examples/event_bus/main.go)：以 sequenced runner 實作 event bus。
 - [`examples/parallel_tasks/main.go`](examples/parallel_tasks/main.go)：parallel runner 功能與併發上限示範。
 
+### 6. 可觀測性（Observability）
+
+#### Metrics 介面
+
+`core.Metrics` 介面定義了四個事件驅動方法。實作透過 `TaskSchedulerConfig.Metrics` 注入，任務執行時自動呼叫——無需修改任務 API。
+
+| 方法 | 觸發時機 | `runnerName` 值 |
+|---|---|---|
+| `RecordTaskDuration(runnerName, priority, duration)` | 任務在 pool `workerLoop` 中執行完成 | Pool ID（如 `"metrics-pool"`） |
+| `RecordTaskPanic(runnerName, panicInfo)` | 任務在 runner `runLoop` 及 pool `workerLoop` 中 panic（各記錄一次） | Runner 名稱（如 `"metrics-seq"`）+ Pool ID |
+| `RecordQueueDepth(runnerName, depth)` | Scheduler 入列/出列/關閉 + runner 佇列變更（`emitQueueDepth`） | `"TaskScheduler"`（排程器佇列）+ Runner 名稱（runner 佇列） |
+| `RecordTaskRejected(runnerName, reason)` | 排程器關閉期間提交任務 | `"TaskScheduler"` |
+
+#### Prometheus 匯出器
+
+`MetricsExporter` 將 `core.Metrics` 轉接為 Prometheus collector：
+
+```go
+import (
+    obs "github.com/Swind/go-task-runner/observability/prometheus"
+    prom "github.com/prometheus/client_golang/prometheus"
+)
+
+reg := prom.NewRegistry()
+exporter, _ := obs.NewMetricsExporter("taskrunner", reg, obs.ExporterOptions{
+    DurationBuckets: []float64{.005, .01, .025, .05, .075, .1, .25, .5, 1, 2.5, 5, 10},
+})
+```
+
+| 指標 | 型態 | Labels | 說明 |
+|---|---|---|---|
+| `<ns>_task_duration_seconds` | Histogram | `runner`, `priority` | 任務執行耗時（wall-clock） |
+| `<ns>_task_panic_total` | Counter | `runner` | 累計 panic 次數 |
+| `<ns>_task_rejected_total` | Counter | `runner`, `reason` | 累計拒絕次數 |
+| `<ns>_queue_depth` | Gauge | `runner` | 即時佇列深度 |
+
+**Priority label 值：** `user_blocking`、`user_visible`、`best_effort`、`unknown`
+
+**`runner` label 值來源：**
+
+| Label | 來源 |
+|---|---|
+| `TaskScheduler` | 排程器層級的優先級佇列（入列/出列/關閉） |
+| Pool ID（如 `metrics-pool`） | 任務耗時與 panic 在 pool 層級記錄 |
+| Runner 名稱（如 `metrics-seq`） | 佇列深度與 panic 在 runner 層級記錄 |
+
+**PromQL 範例：**
+
+```promql
+sum(rate(taskrunner_task_duration_seconds_count[5m])) by (runner)
+max(taskrunner_queue_depth) by (runner)
+rate(taskrunner_task_panic_total[5m])
+```
+
+#### Stats() 內省
+
+`RunnerStats` 與 `PoolStats` 可透過 `runner.Stats()` 和 `pool.Stats()` 按需查詢。這些資料**不會**自動匯出到 Prometheus——適合用於除錯或自訂監控。
+
+**`RunnerStats`**
+
+| 欄位 | 型態 | 說明 |
+|---|---|---|
+| `Name` | `string` | Runner 顯示名稱 |
+| `Type` | `string` | `"sequenced"`、`"parallel"` 或 `"single-thread"` |
+| `Pending` | `int` | Runner 佇列中等待的任務數 |
+| `Running` | `int` | 目前執行中的任務數（sequenced/single-thread 為 0 或 1） |
+| `Rejected` | `int64` | 累計拒絕次數 |
+| `Closed` | `bool` | 是否已呼叫 `Shutdown()` |
+| `BarrierPending` | `bool` | 是否有 barrier task 等待中（僅 parallel） |
+
+**`PoolStats`**
+
+| 欄位 | 型態 | 說明 |
+|---|---|---|
+| `ID` | `string` | Pool 識別碼 |
+| `Workers` | `int` | Worker goroutine 數量 |
+| `Queued` | `int` | 排程器佇列中的任務數 |
+| `Active` | `int` | 目前執行中的任務數 |
+| `Delayed` | `int` | 等待延遲執行的任務數 |
+| `Running` | `bool` | Pool 是否運行中 |
+
+#### 快速體驗
+
+```bash
+go run ./examples/prometheus_metrics
+curl -s http://127.0.0.1:2112/metrics | grep '^taskrunner_'
+```
+
+完整接線範例請見 [examples/prometheus_metrics](examples/prometheus_metrics/main.go)。
+
 ## 架構文件
 
 深入架構請見 [`docs/DESIGN.md`](docs/DESIGN.md)，包含 `TaskScheduler`、`DelayManager`、`TaskQueue` 的互動說明。
