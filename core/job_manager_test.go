@@ -1161,6 +1161,25 @@ func TestJobManager_RegisterHandler_AfterShutdown(t *testing.T) {
 	}
 }
 
+func TestJobManager_UnregisterHandler(t *testing.T) {
+	manager, cleanup := setupJobManager(t)
+	defer cleanup()
+
+	type NoArgs struct{}
+	_ = core.RegisterHandler(manager, context.Background(), "test", func(ctx context.Context, args NoArgs) error {
+		return nil
+	})
+
+	if err := manager.UnregisterHandler(context.Background(), "test"); err != nil {
+		t.Fatalf("UnregisterHandler failed: %v", err)
+	}
+
+	err := manager.SubmitJob(context.Background(), "j1", "test", NoArgs{}, core.DefaultTaskTraits())
+	if err == nil {
+		t.Fatal("expected error for unregistered handler")
+	}
+}
+
 // TestJobManager_SubmitDelayedJob_SerializeError verifies delayed submit fails on non-serializable arguments
 // Given: A job manager with registered handler
 // When: SubmitDelayedJob is called with non-JSON-serializable args
