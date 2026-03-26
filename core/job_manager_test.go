@@ -2393,3 +2393,121 @@ func TestJobManager_Start_MissingHandlerMarksJobFailed(t *testing.T) {
 		t.Fatalf("Result = %q, want %q", job.Result, "Missing handler during recovery")
 	}
 }
+
+// =============================================================================
+// Finalize vs Shutdown Race Condition
+// =============================================================================
+
+// slowUpdateJobStore wraps MemoryJobStore and makes UpdateStatus block until
+// a signal is received, simulating slow IO that exposes the finalize/shutdown race.
+type slowUpdateJobStore struct {
+	*core.MemoryJobStore
+	updateCalled atomic.Bool
+	unblock      chan struct{}
+}
+
+func newSlowUpdateJobStore() *slowUpdateJobStore {
+	return &slowUpdateJobStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+		unblock:        make(chan struct{}),
+	}
+}
+
+func (s *slowUpdateJobStore) UpdateStatus(ctx context.Context, id string, status core.JobStatus, result string) error {
+	s.updateCalled.Store(true)
+	<-s.unblock
+	return s.MemoryJobStore.UpdateStatus(ctx, id, status, result)
+}
+
+// TestJobManager_FinalizeStatusPersistedAfterShutdown verifies that a job's final
+// status update is not lost when Shutdown races with finalizeJobControl.
+// Given: A job with a slow UpdateStatus store
+// When: Job completes and Shutdown is called immediately
+// Then: The COMPLETED status is persisted to the store before Shutdown returns
+func TestJobManager_FinalizeStatusPersistedAfterShutdown(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	store := newSlowUpdateJobStore()
+	serializer := core.NewJSONSerializer()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	type Args struct {
+		Val string `json:"val"`
+	}
+
+	handlerDone := make(chan struct{})
+	_ = core.RegisterHandler(manager, "finalize-test", func(ctx context.Context, args Args) error {
+		close(handlerDone)
+		return nil
+	})
+
+	// Act - Submit job
+	err := manager.SubmitJob(context.Background(), "finalize-job", "finalize-test", Args{Val: "ok"}, core.DefaultTaskTraits())
+	if err != nil {
+		t.Fatalf("SubmitJob failed: %v", err)
+	}
+
+	// Wait for handler to complete (so finalizeJobControl runs)
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not complete")
+	}
+
+	// Wait for the slow UpdateStatus to be called
+	deadline := time.After(2 * time.Second)
+	for {
+		if store.updateCalled.Load() {
+			break
+		}
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-deadline:
+			t.Fatal("UpdateStatus was never called")
+		}
+	}
+
+	// Now call Shutdown — this must wait for the pending status update
+	shutdownDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownDone <- manager.Shutdown(ctx)
+	}()
+
+	// Assert - Shutdown must NOT return before status is persisted
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("Shutdown returned before status was persisted: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Unblock the slow UpdateStatus
+	close(store.unblock)
+
+	// Assert - Shutdown completes and status is persisted
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("Shutdown failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown timed out")
+	}
+
+	job, err := store.GetJob(context.Background(), "finalize-job")
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
+	}
+	if job.Status != core.JobStatusCompleted {
+		t.Errorf("Status = %s, want COMPLETED (status update was lost)", job.Status)
+	}
+}

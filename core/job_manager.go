@@ -44,8 +44,9 @@ type JobManager struct {
 	logger       Logger
 	errorHandler ErrorHandler
 
-	closed atomic.Bool
-	cfgMu  sync.RWMutex
+	closed          atomic.Bool
+	cfgMu           sync.RWMutex
+	pendingFinalize atomic.Int32
 }
 
 type runtimeConfigSnapshot struct {
@@ -423,17 +424,22 @@ func (m *JobManager) finalizeJob(id string, status JobStatus, msg string) {
 }
 
 func (m *JobManager) finalizeJobControl(id string, status JobStatus, msg string) {
-	// Clean up activeJobs (fast memory operation)
 	raw, ok := m.activeJobs.LoadAndDelete(id)
 	if !ok {
 		return
 	}
 
 	info := raw.(*activeJobInfo)
-	info.cancel() // Cancel context
+	info.cancel()
 
-	// Step 2: Update DB status (delegate to ioRunner)
-	m.updateStatusIO(id, status, msg)
+	m.pendingFinalize.Add(1)
+	m.ioRunner.PostTask(func(_ context.Context) {
+		defer m.pendingFinalize.Add(-1)
+		ctx := context.Background()
+		_ = m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
+			return m.store.UpdateStatus(ctx, id, status, msg)
+		})
+	})
 }
 
 // =============================================================================
@@ -516,11 +522,9 @@ func (m *JobManager) retryIOOperation(
 func (m *JobManager) updateStatusIO(id string, status JobStatus, msg string) {
 	m.ioRunner.PostTask(func(_ context.Context) {
 		ctx := context.Background()
-		// Use retry logic for status updates
 		_ = m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
 			return m.store.UpdateStatus(ctx, id, status, msg)
 		})
-		// Error already logged and handled by retryIOOperation
 	})
 }
 
@@ -680,8 +684,7 @@ func (m *JobManager) Shutdown(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if m.GetActiveJobCount() == 0 {
-				// 3. Shutdown runners in order
+			if m.GetActiveJobCount() == 0 && m.pendingFinalize.Load() == 0 {
 				m.controlRunner.Shutdown()
 				m.ioRunner.Shutdown()
 				m.executionRunner.Shutdown()
