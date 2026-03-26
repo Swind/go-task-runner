@@ -85,6 +85,10 @@ Read paths are exposed as explicit functions:
 
 Persistence-backed reads go through store APIs; active snapshot reads use the in-memory active map.
 
+**Note:** `MemoryJobStore.ListJobs` returns results in non-deterministic order
+(due to `sync.Map`). Pagination with `Offset`/`Limit` may yield inconsistent
+pages across calls. Production stores should implement deterministic ordering.
+
 ## Retry and Error Handling
 
 IO calls run through retry policy logic with configurable:
