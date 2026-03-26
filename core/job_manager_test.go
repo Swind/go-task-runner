@@ -412,7 +412,7 @@ func TestJobManager_RegisterHandler(t *testing.T) {
 	}
 
 	// Act
-	if err := core.RegisterHandler(manager, "email", handler); err != nil {
+	if err := core.RegisterHandler(manager, context.Background(), "email", handler); err != nil {
 		t.Fatalf("RegisterHandler failed: %v", err)
 	}
 
@@ -443,7 +443,7 @@ func TestJobManager_SubmitAndExecute(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act
 	args := EmailArgs{To: "user@example.com"}
@@ -491,7 +491,7 @@ func TestJobManager_SubmitDelayedJob(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit delayed job
 	delay := 200 * time.Millisecond
@@ -534,7 +534,7 @@ func TestJobManager_CancelJob(t *testing.T) {
 		return ctx.Err()
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
@@ -548,7 +548,7 @@ func TestJobManager_CancelJob(t *testing.T) {
 	}
 
 	// Act - Cancel job
-	if err := manager.CancelJob("job1"); err != nil {
+	if err := manager.CancelJob(context.Background(), "job1"); err != nil {
 		t.Fatalf("CancelJob failed: %v", err)
 	}
 
@@ -590,7 +590,7 @@ func TestJobManager_JobFailure(t *testing.T) {
 		return fmt.Errorf("simulated failure")
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
@@ -639,7 +639,7 @@ func TestJobManager_DuplicateSubmission(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit first job
 	args := EmailArgs{To: "user@example.com"}
@@ -684,7 +684,7 @@ func TestJobManager_GetActiveJobs(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit 3 jobs
 	for i := 0; i < 3; i++ {
@@ -726,7 +726,7 @@ func TestJobManager_Recovery(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Note: This test requires access to internal store
 	t.Skip("Skipping recovery test - requires internal store access")
@@ -748,7 +748,7 @@ func TestJobManager_Shutdown(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit job
 	args := EmailArgs{To: "user@example.com"}
@@ -813,7 +813,7 @@ func TestJobManager_ConcurrentSubmissions(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit 20 jobs concurrently
 	const jobCount = 20
@@ -1013,7 +1013,7 @@ func TestJobManager_RetrySuccess(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act - Submit job
@@ -1068,7 +1068,7 @@ func TestJobManager_SubmitJobIO_DuplicateInStoreRollsBackActiveJobs(t *testing.T
 
 	// Arrange
 	handlerRan := atomic.Bool{}
-	_ = core.RegisterHandler(manager, "dup", func(ctx context.Context, args Args) error {
+	_ = core.RegisterHandler(manager, context.Background(), "dup", func(ctx context.Context, args Args) error {
 		handlerRan.Store(true)
 		return nil
 	})
@@ -1114,7 +1114,7 @@ func TestJobManager_SubmitJobIO_SaveFailureRollsBackActiveJobs(t *testing.T) {
 
 	// Arrange
 	handlerRan := atomic.Bool{}
-	_ = core.RegisterHandler(manager, "savefail", func(ctx context.Context, args Args) error {
+	_ = core.RegisterHandler(manager, context.Background(), "savefail", func(ctx context.Context, args Args) error {
 		handlerRan.Store(true)
 		return nil
 	})
@@ -1153,7 +1153,7 @@ func TestJobManager_RegisterHandler_AfterShutdown(t *testing.T) {
 	}
 
 	// Act
-	err := core.RegisterHandler(manager, "x", func(ctx context.Context, args struct{}) error { return nil })
+	err := core.RegisterHandler(manager, context.Background(), "x", func(ctx context.Context, args struct{}) error { return nil })
 
 	// Assert
 	if err == nil {
@@ -1171,7 +1171,7 @@ func TestJobManager_SubmitDelayedJob_SerializeError(t *testing.T) {
 	defer cleanup()
 
 	// Arrange
-	_ = core.RegisterHandler(manager, "x", func(ctx context.Context, args map[string]string) error { return nil })
+	_ = core.RegisterHandler(manager, context.Background(), "x", func(ctx context.Context, args map[string]string) error { return nil })
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
@@ -1200,7 +1200,7 @@ func TestJobManager_CancelJob_NotFoundAndClosed(t *testing.T) {
 	defer cleanup()
 
 	// Act and Assert
-	if err := manager.CancelJob("missing"); err == nil {
+	if err := manager.CancelJob(context.Background(), "missing"); err == nil {
 		t.Fatal("CancelJob() should fail for missing job")
 	}
 
@@ -1212,7 +1212,7 @@ func TestJobManager_CancelJob_NotFoundAndClosed(t *testing.T) {
 	}
 
 	// Assert
-	if err := manager.CancelJob("anything"); err == nil {
+	if err := manager.CancelJob(context.Background(), "anything"); err == nil {
 		t.Fatal("CancelJob() should fail when manager is closed")
 	}
 }
@@ -1258,7 +1258,7 @@ func TestJobManager_Shutdown_AlreadyClosedAndTimeout(t *testing.T) {
 		Val string `json:"val"`
 	}
 	block := make(chan struct{})
-	_ = core.RegisterHandler(manager, "block", func(ctx context.Context, args Args) error {
+	_ = core.RegisterHandler(manager, context.Background(), "block", func(ctx context.Context, args Args) error {
 		<-block
 		return nil
 	})
@@ -1336,7 +1336,7 @@ func TestJobManager_RetryExhausted(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
@@ -1426,7 +1426,7 @@ func TestJobManager_NoRetry(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act
@@ -1562,7 +1562,7 @@ func TestJobManager_ContextPropagation_ParentCancelsJob(t *testing.T) {
 		return ctx.Err()
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 
@@ -1627,7 +1627,7 @@ func TestJobManager_ContextPropagation_ParentTimeout(t *testing.T) {
 		}
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	parentCtx, parentCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer parentCancel()
@@ -1687,7 +1687,7 @@ func TestJobManager_DuplicatePrevention_Concurrent(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	const concurrentSubmissions = 10
 	args := EmailArgs{To: "user@example.com"}
@@ -1745,7 +1745,7 @@ func TestJobManager_DuplicatePrevention_Sequential(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit first job
 	args := EmailArgs{To: "user@example.com"}
@@ -1806,7 +1806,7 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 	time.Sleep(50 * time.Millisecond)
 
 	// Act - Try to submit duplicate
@@ -2059,7 +2059,7 @@ func TestJobManager_Start_RecoveryFromPendingJobs(t *testing.T) {
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Create PENDING job in store (simulating previous run)
 	ctx := context.Background()
@@ -2230,7 +2230,7 @@ func TestJobManager_SubmitJob_LegacyStoreFallback(t *testing.T) {
 	}
 
 	done := make(chan struct{}, 1)
-	_ = core.RegisterHandler(manager, "legacy", func(ctx context.Context, args Args) error {
+	_ = core.RegisterHandler(manager, context.Background(), "legacy", func(ctx context.Context, args Args) error {
 		select {
 		case done <- struct{}{}:
 		default:
@@ -2280,7 +2280,7 @@ func TestJobManager_SubmitJob_ContextTimeoutDuringRetry(t *testing.T) {
 	type Args struct {
 		Val string `json:"val"`
 	}
-	_ = core.RegisterHandler(manager, "retry-timeout", func(ctx context.Context, args Args) error { return nil })
+	_ = core.RegisterHandler(manager, context.Background(), "retry-timeout", func(ctx context.Context, args Args) error { return nil })
 
 	// Act
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -2444,7 +2444,7 @@ func TestJobManager_FinalizeStatusPersistedAfterShutdown(t *testing.T) {
 	}
 
 	handlerDone := make(chan struct{})
-	_ = core.RegisterHandler(manager, "finalize-test", func(ctx context.Context, args Args) error {
+	_ = core.RegisterHandler(manager, context.Background(), "finalize-test", func(ctx context.Context, args Args) error {
 		close(handlerDone)
 		return nil
 	})
@@ -2579,7 +2579,7 @@ func TestJobManager_SubmitJob_ContextCanceledDuringIO_PreventsExecution(t *testi
 		return nil
 	}
 
-	_ = core.RegisterHandler(manager, "email", handler)
+	_ = core.RegisterHandler(manager, context.Background(), "email", handler)
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 
@@ -2704,5 +2704,20 @@ func TestJobManager_SetShutdownRunners_DefaultShutsDownRunners(t *testing.T) {
 	}
 	if !executionRunner.IsClosed() {
 		t.Error("executionRunner should be closed by default")
+	}
+}
+
+func TestJobStatus_IsValid(t *testing.T) {
+	valid := []core.JobStatus{
+		core.JobStatusPending, core.JobStatusRunning,
+		core.JobStatusCompleted, core.JobStatusFailed, core.JobStatusCanceled,
+	}
+	for _, s := range valid {
+		if !s.IsValid() {
+			t.Errorf("JobStatus(%q).IsValid() = false, want true", s)
+		}
+	}
+	if core.JobStatus("UNKNOWN").IsValid() {
+		t.Error("JobStatus(UNKNOWN).IsValid() = true, want false")
 	}
 }

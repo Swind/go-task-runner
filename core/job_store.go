@@ -22,6 +22,18 @@ const (
 	JobStatusCanceled  JobStatus = "CANCELED"
 )
 
+func (s JobStatus) String() string {
+	return string(s)
+}
+
+func (s JobStatus) IsValid() bool {
+	switch s {
+	case JobStatusPending, JobStatusRunning, JobStatusCompleted, JobStatusFailed, JobStatusCanceled:
+		return true
+	}
+	return false
+}
+
 type JobEntity struct {
 	ID        string
 	Type      string
