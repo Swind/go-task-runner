@@ -21,11 +21,6 @@ func main() {
 		panic(err)
 	}
 
-	poller, err := obs.NewSnapshotPoller(reg, 50*time.Millisecond)
-	if err != nil {
-		panic(err)
-	}
-
 	config := &core.TaskSchedulerConfig{
 		PanicHandler:        &core.DefaultPanicHandler{},
 		Metrics:             exporter,
@@ -38,11 +33,6 @@ func main() {
 
 	runner := taskrunner.NewSequencedTaskRunner(pool)
 	runner.SetName("metrics-seq")
-
-	poller.AddPool("metrics-pool", pool)
-	poller.AddRunner("metrics-seq", runner)
-	poller.Start(context.Background())
-	defer poller.Stop()
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))

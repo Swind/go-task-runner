@@ -255,8 +255,7 @@ Use `TaskSchedulerConfig.Metrics = exporter` to export:
 - task panic/rejection counters
 - queue depth gauges
 
-For runner/pool `Stats()` snapshots, attach `SnapshotPoller`.
-See [examples/prometheus_metrics](examples/prometheus_metrics/main.go).
+See [examples/prometheus_metrics](examples/prometheus_metrics/main.go) for a full wiring example.
 
 Quick local check:
 
