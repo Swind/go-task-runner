@@ -91,14 +91,16 @@ func TestDelayManager_ConcurrentAdd(t *testing.T) {
 	}
 
 	wg.Wait()
-	// Wait for delayed tasks to execute
-	time.Sleep(1500 * time.Millisecond)
 
-	// Assert - All tasks should execute
-	count := executed.Load()
-	if count < int32(numTasks*90/100) {
-		t.Errorf("executed tasks = %d, want ~%d", count, numTasks)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if executed.Load() >= numTasks {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	t.Errorf("executed tasks = %d, want %d", executed.Load(), numTasks)
 }
 
 // TestDelayManager_HighFrequencyTimerResets verifies stability under rapid timer resets
