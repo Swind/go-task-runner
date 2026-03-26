@@ -154,7 +154,7 @@ func (s *MemoryJobStore) UpdateStatus(ctx context.Context, id string, status Job
 	updatedJob := &JobEntity{
 		ID:        job.ID,
 		Type:      job.Type,
-		ArgsData:  job.ArgsData,
+		ArgsData:  append([]byte(nil), job.ArgsData...),
 		Status:    status,
 		Result:    result,
 		Priority:  job.Priority,
@@ -187,6 +187,9 @@ func (s *MemoryJobStore) GetJob(ctx context.Context, id string) (*JobEntity, err
 	}, nil
 }
 
+// ListJobs returns jobs matching the filter.
+// Results are not ordered; pagination with Offset/Limit may return
+// inconsistent results across calls. Use for testing only.
 func (s *MemoryJobStore) ListJobs(ctx context.Context, filter JobFilter) ([]*JobEntity, error) {
 	var jobs []*JobEntity
 	count := 0
