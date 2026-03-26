@@ -682,3 +682,19 @@ func TestSingleThreadTaskRunner_QueuePolicy_DropVsReject(t *testing.T) {
 
 	runner2.Stop()
 }
+
+func TestSingleThreadTaskRunner_DelayedTaskIgnoredAfterStop(t *testing.T) {
+	runner := NewSingleThreadTaskRunner()
+	var executed atomic.Bool
+
+	runner.PostDelayedTask(func(ctx context.Context) {
+		executed.Store(true)
+	}, 500*time.Millisecond)
+
+	runner.Stop()
+
+	time.Sleep(700 * time.Millisecond)
+	if executed.Load() {
+		t.Error("delayed task should not execute after runner is stopped")
+	}
+}

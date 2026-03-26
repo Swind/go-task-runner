@@ -280,9 +280,11 @@ func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraitsNamed(name string, tas
 	case <-r.ctx.Done():
 		return
 	default:
-		// time.AfterFunc spawns a new goroutine when the timer fires,
-		// we enqueue the wrapped task back into our main loop
+		closed := &r.closed
 		time.AfterFunc(delay, func() {
+			if closed.Load() {
+				return
+			}
 			r.enqueueTask(task, task, traits)
 		})
 	}
