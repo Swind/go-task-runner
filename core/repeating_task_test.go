@@ -235,6 +235,41 @@ func TestRepeatingTask_ContextPropagation(t *testing.T) {
 	}
 }
 
+func TestRepeatingTask_StopsOnRunnerShutdown(t *testing.T) {
+	pool := newTestThreadPool()
+	pool.start()
+
+	runner := NewSequencedTaskRunner(pool)
+
+	var counter atomic.Int32
+	handle := runner.PostRepeatingTask(func(ctx context.Context) {
+		counter.Add(1)
+	}, 50*time.Millisecond)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if counter.Load() >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	countBeforeShutdown := counter.Load()
+	if countBeforeShutdown < 1 {
+		t.Fatalf("expected at least 1 execution, got %d", countBeforeShutdown)
+	}
+
+	runner.Shutdown()
+
+	time.Sleep(200 * time.Millisecond)
+	countAfterShutdown := counter.Load()
+	if countAfterShutdown != countBeforeShutdown {
+		t.Errorf("repeating task continued after shutdown: before=%d, after=%d", countBeforeShutdown, countAfterShutdown)
+	}
+
+	_ = handle
+}
+
 // =============================================================================
 // Test helper: simple thread pool for testing
 // =============================================================================
