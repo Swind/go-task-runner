@@ -25,7 +25,6 @@ type SequencedTaskRunner struct {
 	metadata   map[string]any
 	metadataMu sync.Mutex // Protects name and metadata
 
-	history executionHistory
 }
 
 func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
@@ -34,7 +33,6 @@ func NewSequencedTaskRunner(threadPool ThreadPool) *SequencedTaskRunner {
 		queue:        NewFIFOTaskQueue(),
 		shutdownChan: make(chan struct{}),
 		metadata:     make(map[string]any),
-		history:      newExecutionHistory(defaultTaskHistoryCapacity),
 	}
 }
 
@@ -101,16 +99,7 @@ func (r *SequencedTaskRunner) Stats() RunnerStats {
 		Running: r.RunningTaskCount(),
 		Closed:  r.IsClosed(),
 	}
-	if last, ok := r.history.Last(); ok {
-		stats.LastTaskName = last.Name
-		stats.LastTaskAt = last.FinishedAt
-	}
 	return stats
-}
-
-// RecentTasks returns completed task execution records in newest-first order.
-func (r *SequencedTaskRunner) RecentTasks(limit int) []TaskExecutionRecord {
-	return r.history.Recent(limit)
 }
 
 func (r *SequencedTaskRunner) observabilityName() string {
@@ -119,10 +108,6 @@ func (r *SequencedTaskRunner) observabilityName() string {
 		return "sequenced"
 	}
 	return name
-}
-
-func (r *SequencedTaskRunner) recordTaskExecution(record TaskExecutionRecord) {
-	r.history.Add(record)
 }
 
 func (r *SequencedTaskRunner) emitQueueDepth(depth int) {
@@ -272,7 +257,7 @@ func (r *SequencedTaskRunner) PostTaskWithTraitsNamed(name string, task Task, tr
 		return
 	}
 
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "sequenced", r.recordTaskExecution)
+	wrapped := task
 
 	r.queueMu.Lock()
 	r.queue.Push(wrapped, traits)
@@ -300,7 +285,7 @@ func (r *SequencedTaskRunner) PostDelayedTaskNamed(name string, task Task, delay
 
 // PostDelayedTaskWithTraitsNamed submits a delayed named task with specified traits.
 func (r *SequencedTaskRunner) PostDelayedTaskWithTraitsNamed(name string, task Task, delay time.Duration, traits TaskTraits) {
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "sequenced", r.recordTaskExecution)
+	wrapped := task
 	r.threadPool.PostDelayedInternal(wrapped, delay, traits, r)
 }
 

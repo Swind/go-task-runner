@@ -62,8 +62,6 @@ type SingleThreadTaskRunner struct {
 	name     string
 	metadata map[string]any
 	mu       sync.Mutex
-
-	history executionHistory
 }
 
 // NewSingleThreadTaskRunner creates and starts a new SingleThreadTaskRunner.
@@ -78,7 +76,6 @@ func NewSingleThreadTaskRunner() *SingleThreadTaskRunner {
 		shutdownChan: make(chan struct{}),
 		metadata:     make(map[string]any),
 		queuePolicy:  QueuePolicyDrop, // Default: drop tasks when queue is full
-		history:      newExecutionHistory(defaultTaskHistoryCapacity),
 	}
 
 	// Start the dedicated message loop
@@ -146,16 +143,7 @@ func (r *SingleThreadTaskRunner) Stats() RunnerStats {
 		Rejected: r.RejectedCount(),
 		Closed:   r.IsClosed(),
 	}
-	if last, ok := r.history.Last(); ok {
-		stats.LastTaskName = last.Name
-		stats.LastTaskAt = last.FinishedAt
-	}
 	return stats
-}
-
-// RecentTasks returns completed task execution records in newest-first order.
-func (r *SingleThreadTaskRunner) RecentTasks(limit int) []TaskExecutionRecord {
-	return r.history.Recent(limit)
 }
 
 func (r *SingleThreadTaskRunner) observabilityName() string {
@@ -164,10 +152,6 @@ func (r *SingleThreadTaskRunner) observabilityName() string {
 		return "single-thread"
 	}
 	return name
-}
-
-func (r *SingleThreadTaskRunner) recordTaskExecution(record TaskExecutionRecord) {
-	r.history.Add(record)
 }
 
 func (r *SingleThreadTaskRunner) enqueueTask(task Task, rejectTask Task, traits TaskTraits) {
@@ -266,8 +250,7 @@ func (r *SingleThreadTaskRunner) PostTaskNamed(name string, task Task) {
 
 // PostTaskWithTraitsNamed submits a named task with traits.
 func (r *SingleThreadTaskRunner) PostTaskWithTraitsNamed(name string, task Task, traits TaskTraits) {
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "single-thread", r.recordTaskExecution)
-	r.enqueueTask(wrapped, task, traits)
+	r.enqueueTask(task, task, traits)
 }
 
 // PostDelayedTask submits a delayed task
@@ -293,8 +276,6 @@ func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraitsNamed(name string, tas
 		return
 	}
 
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "single-thread", r.recordTaskExecution)
-
 	select {
 	case <-r.ctx.Done():
 		return
@@ -302,7 +283,7 @@ func (r *SingleThreadTaskRunner) PostDelayedTaskWithTraitsNamed(name string, tas
 		// time.AfterFunc spawns a new goroutine when the timer fires,
 		// we enqueue the wrapped task back into our main loop
 		time.AfterFunc(delay, func() {
-			r.enqueueTask(wrapped, task, traits)
+			r.enqueueTask(task, task, traits)
 		})
 	}
 }

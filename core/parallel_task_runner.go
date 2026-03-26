@@ -58,8 +58,6 @@ type ParallelTaskRunner struct {
 	name       string
 	metadata   map[string]any
 	metadataMu sync.Mutex
-
-	history executionHistory
 }
 
 // NewParallelTaskRunner creates a new ParallelTaskRunner with the specified concurrency limit.
@@ -89,7 +87,6 @@ func NewParallelTaskRunner(threadPool ThreadPool, maxConcurrency int) *ParallelT
 		shutdownChan:   make(chan struct{}),
 		barrierTaskIDs: make(map[TaskID]bool),
 		metadata:       make(map[string]any),
-		history:        newExecutionHistory(defaultTaskHistoryCapacity),
 	}
 	return r
 }
@@ -119,16 +116,7 @@ func (r *ParallelTaskRunner) Stats() RunnerStats {
 		Closed:         r.IsClosed(),
 		BarrierPending: r.barrierTaskRunning.Load(),
 	}
-	if last, ok := r.history.Last(); ok {
-		stats.LastTaskName = last.Name
-		stats.LastTaskAt = last.FinishedAt
-	}
 	return stats
-}
-
-// RecentTasks returns completed task execution records in newest-first order.
-func (r *ParallelTaskRunner) RecentTasks(limit int) []TaskExecutionRecord {
-	return r.history.Recent(limit)
 }
 
 func (r *ParallelTaskRunner) observabilityName() string {
@@ -137,10 +125,6 @@ func (r *ParallelTaskRunner) observabilityName() string {
 		return "parallel"
 	}
 	return name
-}
-
-func (r *ParallelTaskRunner) recordTaskExecution(record TaskExecutionRecord) {
-	r.history.Add(record)
 }
 
 func (r *ParallelTaskRunner) emitQueueDepth(depth int) {
@@ -237,8 +221,6 @@ func (r *ParallelTaskRunner) PostTaskNamed(name string, task Task) {
 
 // PostTaskWithTraitsNamed submits a named task with specified traits.
 func (r *ParallelTaskRunner) PostTaskWithTraitsNamed(name string, task Task, traits TaskTraits) {
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "parallel", r.recordTaskExecution)
-
 	// Submit scheduling operation to internal SingleThreadTaskRunner
 	// This guarantees all queue/scheduling operations run sequentially
 	// on the scheduler's dedicated goroutine.
@@ -247,7 +229,7 @@ func (r *ParallelTaskRunner) PostTaskWithTraitsNamed(name string, task Task, tra
 			return
 		}
 		// Queue and schedule (executed serially on scheduler)
-		r.queue.Push(wrapped, traits)
+		r.queue.Push(task, traits)
 		r.emitQueueDepth(r.queue.Len())
 		r.tryScheduleInternal(ctx)
 	})
@@ -274,10 +256,9 @@ func (r *ParallelTaskRunner) PostDelayedTaskWithTraitsNamed(name string, task Ta
 	if r.closed.Load() {
 		return
 	}
-	wrapped := wrapObservedTask(task, name, traits, r.observabilityName(), "parallel", r.recordTaskExecution)
 	// Delegate to thread pool's delayed task mechanism
 	// When delay expires, the task will be posted back to this runner via PostTask
-	r.threadPool.PostDelayedInternal(wrapped, delay, traits, r)
+	r.threadPool.PostDelayedInternal(task, delay, traits, r)
 }
 
 // =============================================================================
