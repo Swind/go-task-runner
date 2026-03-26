@@ -351,7 +351,7 @@ func (m *JobManager) scheduleExecution(
 		}
 
 		// Update to RUNNING (via ioRunner)
-		m.updateStatusIO(entity.ID, JobStatusRunning, "")
+		m.updateStatusIO(jobCtx, entity.ID, JobStatusRunning, "")
 
 		// Execute handler
 		var err error
@@ -529,9 +529,8 @@ func (m *JobManager) retryIOOperation(
 	return lastErr
 }
 
-func (m *JobManager) updateStatusIO(id string, status JobStatus, msg string) {
+func (m *JobManager) updateStatusIO(ctx context.Context, id string, status JobStatus, msg string) {
 	m.ioRunner.PostTask(func(_ context.Context) {
-		ctx := context.Background()
 		_ = m.retryIOOperation(ctx, "UpdateStatus", id, func(ctx context.Context) error {
 			return m.store.UpdateStatus(ctx, id, status, msg)
 		})
@@ -631,7 +630,7 @@ func (m *JobManager) doRecoveryIO(ctx context.Context) error {
 			// Get handler
 			rawHandler, ok := m.handlers.Load(jobCopy.Type)
 			if !ok {
-				m.updateStatusIO(jobCopy.ID, JobStatusFailed, "Missing handler during recovery")
+				m.updateStatusIO(context.Background(), jobCopy.ID, JobStatusFailed, "Missing handler during recovery")
 				close(done)
 				return
 			}
