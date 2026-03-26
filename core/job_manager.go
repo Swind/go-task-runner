@@ -47,6 +47,7 @@ type JobManager struct {
 	closed          atomic.Bool
 	cfgMu           sync.RWMutex
 	pendingFinalize atomic.Int32
+	shutdownRunners atomic.Bool
 }
 
 type runtimeConfigSnapshot struct {
@@ -71,15 +72,17 @@ func NewJobManager(
 	store JobStore,
 	serializer JobSerializer,
 ) *JobManager {
-	return &JobManager{
+	m := &JobManager{
 		controlRunner:   controlRunner,
 		ioRunner:        ioRunner,
 		executionRunner: executionRunner,
 		store:           store,
 		serializer:      serializer,
 		retryPolicy:     DefaultRetryPolicy(),
-		logger:          NewNoOpLogger(), // Default: no logging
+		logger:          NewNoOpLogger(),
 	}
+	m.shutdownRunners.Store(true)
+	return m
 }
 
 // =============================================================================
@@ -110,6 +113,10 @@ func (m *JobManager) SetErrorHandler(handler ErrorHandler) {
 	m.cfgMu.Lock()
 	defer m.cfgMu.Unlock()
 	m.errorHandler = handler
+}
+
+func (m *JobManager) SetShutdownRunners(own bool) {
+	m.shutdownRunners.Store(own)
 }
 
 func (m *JobManager) getRetryPolicyLocked() RetryPolicy {
@@ -694,9 +701,11 @@ func (m *JobManager) Shutdown(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if m.GetActiveJobCount() == 0 && m.pendingFinalize.Load() == 0 {
-				m.controlRunner.Shutdown()
-				m.ioRunner.Shutdown()
-				m.executionRunner.Shutdown()
+				if m.shutdownRunners.Load() {
+					m.controlRunner.Shutdown()
+					m.ioRunner.Shutdown()
+					m.executionRunner.Shutdown()
+				}
 				return nil
 			}
 		}

@@ -2631,3 +2631,78 @@ func TestJobManager_SubmitJob_ContextCanceledDuringIO_PreventsExecution(t *testi
 		t.Errorf("UpdateStatus called %d times, want 0 (scheduleExecution should not be reached)", count)
 	}
 }
+
+func TestJobManager_SetShutdownRunners_SkipsRunnerShutdown(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Act
+	manager.SetShutdownRunners(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := manager.Shutdown(ctx)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if controlRunner.IsClosed() {
+		t.Error("controlRunner should not be closed when SetShutdownRunners(false)")
+	}
+	if ioRunner.IsClosed() {
+		t.Error("ioRunner should not be closed when SetShutdownRunners(false)")
+	}
+	if executionRunner.IsClosed() {
+		t.Error("executionRunner should not be closed when SetShutdownRunners(false)")
+	}
+
+	controlRunner.Shutdown()
+	ioRunner.Shutdown()
+	executionRunner.Shutdown()
+}
+
+func TestJobManager_SetShutdownRunners_DefaultShutsDownRunners(t *testing.T) {
+	// Arrange
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+
+	store := core.NewMemoryJobStore()
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+
+	// Act - default behavior (no SetShutdownRunners call)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := manager.Shutdown(ctx)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if !controlRunner.IsClosed() {
+		t.Error("controlRunner should be closed by default")
+	}
+	if !ioRunner.IsClosed() {
+		t.Error("ioRunner should be closed by default")
+	}
+	if !executionRunner.IsClosed() {
+		t.Error("executionRunner should be closed by default")
+	}
+}

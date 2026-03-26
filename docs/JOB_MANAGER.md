@@ -68,7 +68,9 @@ This means extra `sync.Mutex` is generally not needed for job lifecycle flow its
 1. Marks manager closed.
 2. Cancels active jobs.
 3. Waits for active set to drain.
-4. Shuts down runners in order (`control` -> `io` -> `execution`).
+4. Shuts down runners in order (`control` -> `io` -> `execution`), unless `SetShutdownRunners(false)` was called.
+
+When runners are shared with other subsystems, call `SetShutdownRunners(false)` before `Shutdown` to skip runner teardown. Default is `true` (backward compatible).
 
 ## Read APIs
 
