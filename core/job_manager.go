@@ -96,9 +96,10 @@ func (m *JobManager) SetRetryPolicy(policy RetryPolicy) {
 	m.retryPolicy = policy
 }
 
-// GetRetryPolicy returns the current retry policy
 func (m *JobManager) GetRetryPolicy() RetryPolicy {
-	return m.getRetryPolicyLocked()
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.retryPolicy
 }
 
 // SetLogger sets the logger for JobManager
@@ -119,12 +120,6 @@ func (m *JobManager) SetShutdownRunners(own bool) {
 	m.shutdownRunners.Store(own)
 }
 
-func (m *JobManager) getRetryPolicyLocked() RetryPolicy {
-	m.cfgMu.RLock()
-	defer m.cfgMu.RUnlock()
-	return m.retryPolicy
-}
-
 func (m *JobManager) getRuntimeConfigSnapshotLocked() runtimeConfigSnapshot {
 	m.cfgMu.RLock()
 	defer m.cfgMu.RUnlock()
@@ -141,7 +136,7 @@ func (m *JobManager) getRuntimeConfigSnapshotLocked() runtimeConfigSnapshot {
 
 // RegisterHandler registers a type-safe handler for a job type.
 // The handler will be called with deserialized arguments of type T.
-func RegisterHandler[T any](m *JobManager, jobType string, handler TypedHandler[T]) error {
+func RegisterHandler[T any](m *JobManager, ctx context.Context, jobType string, handler TypedHandler[T]) error {
 	if m.closed.Load() {
 		return fmt.Errorf("JobManager is closed")
 	}
@@ -165,8 +160,28 @@ func RegisterHandler[T any](m *JobManager, jobType string, handler TypedHandler[
 	select {
 	case err := <-errChan:
 		return err
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("register handler timeout for job type %s", jobType)
+	case <-ctx.Done():
+		return fmt.Errorf("register handler canceled for job type %s: %w", jobType, ctx.Err())
+	}
+}
+
+// UnregisterHandler removes a previously registered handler for a job type.
+func (m *JobManager) UnregisterHandler(ctx context.Context, jobType string) error {
+	if m.closed.Load() {
+		return fmt.Errorf("JobManager is closed")
+	}
+
+	errChan := make(chan error, 1)
+	m.controlRunner.PostTask(func(_ context.Context) {
+		m.handlers.Delete(jobType)
+		errChan <- nil
+	})
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -402,7 +417,7 @@ func (m *JobManager) scheduleExecution(
 // =============================================================================
 
 // CancelJob cancels an active job
-func (m *JobManager) CancelJob(id string) error {
+func (m *JobManager) CancelJob(ctx context.Context, id string) error {
 	if m.closed.Load() {
 		return fmt.Errorf("JobManager is closed")
 	}
@@ -415,8 +430,8 @@ func (m *JobManager) CancelJob(id string) error {
 	select {
 	case err := <-errChan:
 		return err
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("cancel job timeout for %s", id)
+	case <-ctx.Done():
+		return fmt.Errorf("cancel job canceled for %s: %w", id, ctx.Err())
 	}
 }
 
