@@ -2511,3 +2511,123 @@ func TestJobManager_FinalizeStatusPersistedAfterShutdown(t *testing.T) {
 		t.Errorf("Status = %s, want COMPLETED (status update was lost)", job.Status)
 	}
 }
+
+// =============================================================================
+// Context Cancel During IO Submission Tests
+// =============================================================================
+
+// blockingCreateStore is a DurableJobStore whose CreateJob blocks until signaled.
+type blockingCreateStore struct {
+	*core.MemoryJobStore
+	allowCreate chan struct{}
+	createDone  chan struct{}
+	updateCount atomic.Int32
+}
+
+func newBlockingCreateStore() *blockingCreateStore {
+	return &blockingCreateStore{
+		MemoryJobStore: core.NewMemoryJobStore(),
+		allowCreate:    make(chan struct{}),
+		createDone:     make(chan struct{}),
+	}
+}
+
+func (s *blockingCreateStore) CreateJob(ctx context.Context, job *core.JobEntity) error {
+	<-s.allowCreate
+	err := s.MemoryJobStore.CreateJob(ctx, job)
+	close(s.createDone)
+	return err
+}
+
+func (s *blockingCreateStore) UpdateStatus(ctx context.Context, id string, status core.JobStatus, msg string) error {
+	s.updateCount.Add(1)
+	return s.MemoryJobStore.UpdateStatus(ctx, id, status, msg)
+}
+
+// TestJobManager_SubmitJob_ContextCanceledDuringIO_PreventsExecution verifies that
+// when the parent context is canceled while IO persistence is in progress,
+// the job handler is NOT called and activeJobs is cleaned up.
+//
+// Given: A JobManager with a DurableJobStore that blocks during CreateJob
+// When: Parent context is canceled while CreateJob is blocked
+// Then: SubmitJob returns an error, handler is never called, activeJobs is cleaned up
+func TestJobManager_SubmitJob_ContextCanceledDuringIO_PreventsExecution(t *testing.T) {
+	// Arrange
+	store := newBlockingCreateStore()
+	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
+	pool.Start(context.Background())
+	controlRunner := core.NewSequencedTaskRunner(pool)
+	ioRunner := core.NewSequencedTaskRunner(pool)
+	executionRunner := core.NewSequencedTaskRunner(pool)
+	serializer := core.NewJSONSerializer()
+
+	manager := core.NewJobManager(controlRunner, ioRunner, executionRunner, store, serializer)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+		pool.Stop()
+	}()
+
+	type EmailArgs struct {
+		To string `json:"to"`
+	}
+
+	handlerCalled := atomic.Bool{}
+	handler := func(ctx context.Context, args EmailArgs) error {
+		handlerCalled.Store(true)
+		return nil
+	}
+
+	_ = core.RegisterHandler(manager, "email", handler)
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+
+	submitDone := make(chan error, 1)
+	go func() {
+		args := EmailArgs{To: "user@example.com"}
+		submitDone <- manager.SubmitJob(parentCtx, "cancel-during-io", "email", args, core.DefaultTaskTraits())
+	}()
+
+	// Wait for CreateJob to be called (blocked)
+	select {
+	case <-store.createDone:
+		t.Fatal("CreateJob completed before we canceled context (test timing issue)")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Act - Cancel parent context while IO is in progress
+	parentCancel()
+
+	// Allow CreateJob to proceed so the ioRunner task can complete
+	close(store.allowCreate)
+
+	// Assert - SubmitJob returns context error
+	select {
+	case err := <-submitDone:
+		if err == nil {
+			t.Fatal("SubmitJob should return error when context is canceled")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SubmitJob did not return")
+	}
+
+	// Assert - Handler was never called
+	time.Sleep(200 * time.Millisecond)
+	if handlerCalled.Load() {
+		t.Error("Handler should not be called when context is canceled during IO")
+	}
+
+	// Assert - activeJobs does not contain the job
+	if manager.GetActiveJobCount() != 0 {
+		t.Errorf("active jobs = %d, want 0 after context cancel during IO", manager.GetActiveJobCount())
+	}
+
+	// Assert - no execution was scheduled (no status updates beyond CreateJob)
+	// Wait for any async operations to settle
+	time.Sleep(500 * time.Millisecond)
+	count := store.updateCount.Load()
+	if count != 0 {
+		t.Errorf("UpdateStatus called %d times, want 0 (scheduleExecution should not be reached)", count)
+	}
+}

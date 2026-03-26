@@ -275,10 +275,15 @@ func (m *JobManager) submitJobIO(
 	result := make(chan error, 1)
 
 	m.ioRunner.PostTask(func(_ context.Context) {
-		// 1. Persist with durable create semantics
+		if jobCtx.Err() != nil {
+			m.activeJobs.Delete(entity.ID)
+			info.cancel()
+			result <- jobCtx.Err()
+			return
+		}
+
 		err := m.persistNewJobIO(ctx, entity)
 		if err != nil {
-			// Roll back active tracking immediately. sync.Map allows concurrent access.
 			m.activeJobs.Delete(entity.ID)
 			info.cancel()
 
@@ -290,10 +295,15 @@ func (m *JobManager) submitJobIO(
 			return
 		}
 
-		// 2. Mark as saved
+		if jobCtx.Err() != nil {
+			m.activeJobs.Delete(entity.ID)
+			info.cancel()
+			result <- jobCtx.Err()
+			return
+		}
+
 		info.dbSaved.Store(true)
 
-		// 3. Schedule execution on Layer 3
 		m.scheduleExecution(entity, jobCtx, handler, traits, delay)
 		result <- nil
 	})
