@@ -334,6 +334,26 @@ func TestDelayManager_ExpiredTasksWithoutWakeup(t *testing.T) {
 	}
 }
 
+func TestDelayManager_NegativeDelayPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for negative delay, got none")
+		}
+	}()
+
+	dm := core.NewDelayManager()
+	defer dm.Stop()
+
+	pool := taskrunner.NewGoroutineThreadPool("test", 2)
+	pool.Start(context.Background())
+	defer pool.Stop()
+
+	runner := core.NewSequencedTaskRunner(pool)
+	defer runner.Shutdown()
+
+	dm.AddDelayedTask(func(ctx context.Context) {}, -1*time.Second, core.DefaultTaskTraits(), runner)
+}
+
 func TestDelayManager_StopPreventsTaskExecution(t *testing.T) {
 	// Arrange
 	dm := core.NewDelayManager()

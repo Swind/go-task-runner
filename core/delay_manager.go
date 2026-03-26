@@ -86,6 +86,10 @@ func (dm *DelayManager) AddDelayedTask(task Task, delay time.Duration, traits Ta
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 
+	if delay < 0 {
+		panic("delay_manager: delay must be non-negative")
+	}
+
 	item := &DelayedTask{
 		RunAt:  time.Now().Add(delay),
 		Task:   task,
