@@ -330,7 +330,10 @@ func (m *JobManager) persistNewJobIO(ctx context.Context, entity *JobEntity) err
 		})
 	}
 
-	// Legacy fallback for stores without atomic create support.
+	cfg := m.getRuntimeConfigSnapshotLocked()
+	cfg.logger.Warn("Store does not implement DurableJobStore; using legacy GetJob+SaveJob fallback (not safe across concurrent JobManager instances)",
+		F("jobID", entity.ID))
+
 	existing, err := m.store.GetJob(ctx, entity.ID)
 	if err == nil && existing != nil &&
 		(existing.Status == JobStatusPending || existing.Status == JobStatusRunning) {

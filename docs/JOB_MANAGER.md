@@ -38,6 +38,8 @@ Behavior:
 
 `MemoryJobStore` implements both and is the default in-memory reference implementation.
 
+**TOCTOU limitation (legacy fallback):** The compatibility path (`GetJob` + `SaveJob`) is susceptible to a time-of-check-to-time-of-use race when two or more `JobManager` instances share the same store concurrently. Both instances may observe the job as absent during `GetJob` and proceed to `SaveJob`, resulting in duplicate entries. This fallback is only safe when a single `JobManager` instance owns the store. Use a `DurableJobStore` implementation with atomic `CreateJob` to avoid this race.
+
 ## Concurrency Model
 
 Core state coordination is lock-minimized by design:
