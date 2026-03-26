@@ -76,7 +76,9 @@ type TaskRunner interface {
 	// [v2.1 New] Support delayed tasks with specific traits
 	PostDelayedTaskWithTraits(task Task, delay time.Duration, traits TaskTraits)
 
-	// [v2.2 New] Support repeating tasks
+	// PostRepeatingTask submits a task that repeats at a fixed interval.
+	// The interval is measured from the end of one execution to the start of the next
+	// (fixed-delay semantics), not from start-to-start (fixed-rate).
 	PostRepeatingTask(task Task, interval time.Duration) RepeatingTaskHandle
 	PostRepeatingTaskWithTraits(task Task, interval time.Duration, traits TaskTraits) RepeatingTaskHandle
 	PostRepeatingTaskWithInitialDelay(task Task, initialDelay, interval time.Duration, traits TaskTraits) RepeatingTaskHandle

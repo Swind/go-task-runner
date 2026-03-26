@@ -258,6 +258,10 @@ func PostDelayedTaskAndReplyWithResultAndTraits[T any](
 	replyTraits TaskTraits,
 	replyRunner TaskRunner,
 ) {
+	// Execution guarantee (Happens-Before):
+	// - The task ALWAYS completes before the reply starts
+	// - The reply ALWAYS sees the final values written by the task
+	// - This is guaranteed by the sequential execution in delayedWrapper
 	var result T
 	var err error
 
