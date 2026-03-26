@@ -4,199 +4,144 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	taskrunner "github.com/Swind/go-task-runner"
+	"github.com/Swind/go-task-runner/eventbus"
 )
 
-type EventType string
-
-type Event struct {
-	Type   EventType
-	Source string // who published this event
-	Data   string
+type UserCreated struct {
+	ID   int
+	Name string
 }
 
-// EventHandler is a function that handles an event
-type EventHandler func(ctx context.Context, event Event)
-
-// EventBus defines the interface for publishing and subscribing to events
-type EventBus interface {
-	// Publish publishes an event to all subscribers asynchronously
-	// Returns immediately after queuing the event
-	Publish(event Event)
-	// Subscribe subscribes to events of a specific type
-	// Returns immediately after queuing the subscription
-	Subscribe(eventType EventType, handler EventHandler) string
-	// Unsubscribe removes a subscription
-	// Returns immediately after queuing the unsubscription
-	Unsubscribe(subscriptionID string)
-}
-
-// TaskRunnerEventBus implements EventBus using go-task-runner
-// All operations (Publish, Subscribe, Unsubscribe) are executed through the task runner
-// to ensure thread-safety without additional mutexes
-type TaskRunnerEventBus struct {
-	runner        *taskrunner.SequencedTaskRunner
-	subscriptions map[EventType][]subscription
-	nextID        int64
-}
-
-type subscription struct {
-	id      string
-	typ     EventType
-	handler EventHandler
-}
-
-// NewTaskRunnerEventBus creates a new event bus
-func NewTaskRunnerEventBus(runner *taskrunner.SequencedTaskRunner) EventBus {
-	return &TaskRunnerEventBus{
-		runner:        runner,
-		subscriptions: make(map[EventType][]subscription),
-		nextID:        0,
-	}
-}
-
-// Publish publishes an event to all subscribers asynchronously
-// The publish operation itself is queued, and then each handler is executed
-func (b *TaskRunnerEventBus) Publish(event Event) {
-	// Queue the publish operation to ensure thread-safety
-	b.runner.PostTask(func(ctx context.Context) {
-		subs, ok := b.subscriptions[event.Type]
-		if !ok || len(subs) == 0 {
-			return
-		}
-
-		// Execute each handler
-		// Handlers run in the same task runner, maintaining order
-		for _, sub := range subs {
-			b.runner.PostTask(func(ctx context.Context) {
-				sub.handler(ctx, event)
-			})
-		}
-	})
-}
-
-// Subscribe subscribes to events of a specific type
-// Returns immediately with a subscription ID
-func (b *TaskRunnerEventBus) Subscribe(eventType EventType, handler EventHandler) string {
-	id := atomic.AddInt64(&b.nextID, 1)
-	subID := generateID(int(id))
-
-	// Capture id by value in the closure
-	subIDStr := subID
-	subHandler := handler
-
-	// Queue the subscription operation
-	b.runner.PostTask(func(ctx context.Context) {
-		b.subscriptions[eventType] = append(b.subscriptions[eventType], subscription{
-			id:      subIDStr,
-			typ:     eventType,
-			handler: subHandler,
-		})
-	})
-
-	return subID
-}
-
-// Unsubscribe removes a subscription
-// The unsubscription is queued and processed asynchronously
-func (b *TaskRunnerEventBus) Unsubscribe(subscriptionID string) {
-	b.runner.PostTask(func(ctx context.Context) {
-		for typ, subs := range b.subscriptions {
-			newSubs := make([]subscription, 0, len(subs))
-			for _, sub := range subs {
-				if sub.id != subscriptionID {
-					newSubs = append(newSubs, sub)
-				}
-			}
-			if len(newSubs) == 0 {
-				delete(b.subscriptions, typ)
-			} else {
-				b.subscriptions[typ] = newSubs
-			}
-		}
-	})
-}
-
-// generateID generates a unique subscription ID
-func generateID(n int) string {
-	// Simple ID generation - can be enhanced if needed
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 8)
-	for i := range b {
-		b[i] = charset[(n+i)%len(charset)]
-	}
-	return string(b)
+type OrderPlaced struct {
+	UserID    int
+	ProductID int
 }
 
 func main() {
-	// 1. Initialize the Global Thread Pool
 	taskrunner.InitGlobalThreadPool(4)
 	defer taskrunner.ShutdownGlobalThreadPool()
 
-	fmt.Println("=== Event Bus Example ===")
-	fmt.Println("Demonstrating lock-free state management with SequencedTaskRunner")
+	fmt.Println("=== EventBus Examples ===")
 	fmt.Println()
 
-	// 2. Create a SequencedTaskRunner
-	// All handlers execute sequentially on this single virtual thread
-	// No locks needed - the runner guarantees exclusive access
-	runner := taskrunner.CreateTaskRunner(taskrunner.TaskTraits{
-		Priority: taskrunner.TaskPriorityUserVisible,
-	})
+	basicOrdering()
+	reentrantPublish()
+	dynamicUnsubscribe()
 
-	done := make(chan struct{})
-	// Shared state accessed only by the sequenced runner - no locks needed!
-	receivedEvents := make([]string, 0)
-	receivedEventIndex := 0
+	fmt.Println("=== All Examples Finished ===")
+}
 
-	eventBus := NewTaskRunnerEventBus(runner)
-
-	// Subscribe to Message events
-	// All handlers run sequentially on the same runner
-	eventBus.Subscribe("Message", func(ctx context.Context, event Event) {
-		receivedEvents = append(receivedEvents, event.Data)
-		if event.Data != fmt.Sprintf("Event %d", receivedEventIndex) {
-			fmt.Printf("✗ Event order mismatch: expected Event %d, got %s\n", receivedEventIndex, event.Data)
-			panic("Event order mismatch")
+func drainIdle(bus *eventbus.EventBus, ctx context.Context) {
+	for i := 0; i < 10; i++ {
+		if err := bus.WaitIdle(ctx); err != nil {
+			break
 		}
-		receivedEventIndex++
+	}
+}
+
+func basicOrdering() {
+	fmt.Println("--- 1. Basic Ordering ---")
+
+	bus := eventbus.NewEventBus(taskrunner.GlobalThreadPool())
+	defer bus.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var counter atomic.Int32
+	const total = 1024
+
+	eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+		if counter.Load() != int32(event.ID) {
+			fmt.Printf("  ERROR: expected ID %d, got %d\n", counter.Load(), event.ID)
+		}
+		counter.Add(1)
 	})
 
-	// Subscribe to Done event to signal completion
-	eventBus.Subscribe("Done", func(ctx context.Context, event Event) {
-		close(done)
-	})
+	bus.WaitIdle(ctx)
 
-	// 3. Publish 1024 Message events
-	for i := range 1024 {
-		eventBus.Publish(Event{
-			Type:   "Message",
-			Source: "main",
-			Data:   fmt.Sprintf("Event %d", i),
-		})
+	for i := range total {
+		bus.Publish(context.Background(), UserCreated{ID: i, Name: fmt.Sprintf("user-%d", i)})
 	}
 
-	// 4. Publish Done event
-	eventBus.Publish(Event{
-		Type:   "Done",
-		Source: "main",
-		Data:   "All events published",
-	})
+	drainIdle(bus, ctx)
 
-	// 5. Wait for completion
-	<-done
-
-	// 6. Verify
-	fmt.Printf("Published: 1024 events\n")
-	fmt.Printf("Received:  %d events\n", len(receivedEvents))
-
-	if len(receivedEvents) == 1024 {
-		fmt.Println("\n✓ All events received successfully!")
-		fmt.Println("\nKey insight: No mutex needed!")
-		fmt.Println("SequencedTaskRunner guarantees that only one task runs at a time,")
-		fmt.Println("providing exclusive access to shared state without locks.")
+	received := counter.Load()
+	if received == total {
+		fmt.Printf("  OK: received %d events in sequential order\n", received)
 	} else {
-		fmt.Printf("\n✗ Expected 1024 events, got %d\n", len(receivedEvents))
+		fmt.Printf("  ERROR: expected %d, received %d\n", total, received)
 	}
+	fmt.Println()
+}
+
+func reentrantPublish() {
+	fmt.Println("--- 2. Reentrant Publish ---")
+
+	bus := eventbus.NewEventBus(taskrunner.GlobalThreadPool())
+	defer bus.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var order []string
+
+	eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+		order = append(order, fmt.Sprintf("user-%d", event.ID))
+		bus.Publish(ctx, OrderPlaced{UserID: event.ID, ProductID: event.ID * 100})
+	})
+
+	eventbus.Subscribe[OrderPlaced](bus, func(ctx context.Context, event OrderPlaced) {
+		order = append(order, fmt.Sprintf("order-%d", event.ProductID))
+	})
+
+	bus.WaitIdle(ctx)
+
+	bus.Publish(context.Background(), UserCreated{ID: 1, Name: "Alice"})
+	bus.Publish(context.Background(), UserCreated{ID: 2, Name: "Bob"})
+
+	drainIdle(bus, ctx)
+
+	fmt.Printf("  Execution order: %v\n", order)
+	fmt.Println("  Key insight: reentrant Publish() is safe because the SequencedTaskRunner")
+	fmt.Println("  queues inner tasks without blocking — no lock re-entrancy deadlock.")
+	fmt.Println()
+}
+
+func dynamicUnsubscribe() {
+	fmt.Println("--- 3. Dynamic Unsubscribe ---")
+
+	bus := eventbus.NewEventBus(taskrunner.GlobalThreadPool())
+	defer bus.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var countA, countB atomic.Int32
+
+	subA := eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+		countA.Add(1)
+	})
+
+	eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+		countB.Add(1)
+	})
+
+	bus.WaitIdle(ctx)
+
+	bus.Publish(context.Background(), UserCreated{ID: 1, Name: "Alice"})
+	drainIdle(bus, ctx)
+
+	bus.Unsubscribe(subA)
+	drainIdle(bus, ctx)
+
+	bus.Publish(context.Background(), UserCreated{ID: 2, Name: "Bob"})
+	drainIdle(bus, ctx)
+
+	fmt.Printf("  Handler A fired: %d (expected 1)\n", countA.Load())
+	fmt.Printf("  Handler B fired: %d (expected 2)\n", countB.Load())
+	fmt.Println()
 }
