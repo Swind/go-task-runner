@@ -1,0 +1,15 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    queries: "queries.sql"
+    schema:  "schema.sql"
+    gen:
+      go:
+        package: "jobdb"
+        out:     "."
+        emit_interface: false
+        emit_json_tags: false
+        emit_db_tags:   false
+        overrides:
+          - db_type: "DATETIME"
+            go_type:  "time.Time"
