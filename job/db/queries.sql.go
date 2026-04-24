@@ -7,6 +7,7 @@ package jobdb
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -317,7 +318,7 @@ func (q *Queries) ListJobsByType(ctx context.Context, arg ListJobsByTypeParams) 
 	return items, nil
 }
 
-const updateJobStatus = `-- name: UpdateJobStatus :exec
+const updateJobStatus = `-- name: UpdateJobStatus :execresult
 UPDATE jobs
 SET status = ?, result = ?, updated_at = ?
 WHERE id = ?
@@ -330,14 +331,13 @@ type UpdateJobStatusParams struct {
 	ID        string
 }
 
-func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateJobStatus,
+func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateJobStatus,
 		arg.Status,
 		arg.Result,
 		arg.UpdatedAt,
 		arg.ID,
 	)
-	return err
 }
 
 const upsertJob = `-- name: UpsertJob :exec

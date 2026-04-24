@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
+
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	jobdb "github.com/Swind/go-task-runner/job/db"
 )
@@ -96,12 +98,23 @@ func (s *SQLiteJobStore) SaveJob(ctx context.Context, job *JobEntity) error {
 
 // UpdateStatus implements JobStore.
 func (s *SQLiteJobStore) UpdateStatus(ctx context.Context, id string, status JobStatus, result string) error {
-	return s.q.UpdateJobStatus(ctx, jobdb.UpdateJobStatusParams{
+	res, err := s.q.UpdateJobStatus(ctx, jobdb.UpdateJobStatusParams{
 		Status:    string(status),
 		Result:    result,
 		UpdatedAt: time.Now(),
 		ID:        id,
 	})
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("job %s: %w", id, ErrJobNotFound)
+	}
+	return nil
 }
 
 // GetJob implements JobStore.
@@ -109,7 +122,7 @@ func (s *SQLiteJobStore) GetJob(ctx context.Context, id string) (*JobEntity, err
 	row, err := s.q.GetJob(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("job %s not found", id)
+			return nil, fmt.Errorf("job %s: %w", id, ErrJobNotFound)
 		}
 		return nil, err
 	}
@@ -124,6 +137,8 @@ func (s *SQLiteJobStore) ListJobs(ctx context.Context, filter JobFilter) ([]*Job
 	hasStatus := filter.Status != ""
 	hasType := filter.Type != ""
 
+	// limit appears twice in each param struct because the SQL uses
+	// CASE WHEN ? = 0 THEN -1 ELSE ? END to implement "no limit".
 	switch {
 	case hasStatus && hasType:
 		rows, err := s.q.ListJobsByStatusAndType(ctx, jobdb.ListJobsByStatusAndTypeParams{
@@ -215,5 +230,18 @@ func rowsToEntities(rows []jobdb.Job) []*JobEntity {
 }
 
 func isUniqueConstraintError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		// SQLite extended result codes encode the primary code in the low 8 bits.
+		// SQLITE_CONSTRAINT (19) covers UNIQUE, PRIMARY KEY, and other uniqueness
+		// violations. We check the primary code so this works whether or not
+		// extended result codes are enabled on the connection.
+		code := sqliteErr.Code()
+		return code&0xFF == sqlite3.SQLITE_CONSTRAINT
+	}
+	// Fallback: string match for drivers that wrap the error differently.
+	return false
 }

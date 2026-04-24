@@ -6,7 +6,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 INSERT OR REPLACE INTO jobs (id, type, args_data, status, result, priority, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
--- name: UpdateJobStatus :exec
+-- name: UpdateJobStatus :execresult
 UPDATE jobs
 SET status = ?, result = ?, updated_at = ?
 WHERE id = ?;

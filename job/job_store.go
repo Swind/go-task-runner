@@ -82,6 +82,9 @@ type JobStore interface {
 // ErrJobAlreadyExists indicates the job ID already exists in persistent storage.
 var ErrJobAlreadyExists = errors.New("job already exists")
 
+// ErrJobNotFound indicates the requested job does not exist.
+var ErrJobNotFound = errors.New("job not found")
+
 // DurableJobStore provides atomic create semantics for durable-ack submission.
 // Implement this interface to guarantee CreateJob fails when a job ID already exists.
 type DurableJobStore interface {
@@ -181,7 +184,7 @@ func (s *MemoryJobStore) UpdateStatus(ctx context.Context, id string, status Job
 func (s *MemoryJobStore) GetJob(ctx context.Context, id string) (*JobEntity, error) {
 	raw, ok := s.data.Load(id)
 	if !ok {
-		return nil, fmt.Errorf("job %s not found", id)
+		return nil, fmt.Errorf("job %s: %w", id, ErrJobNotFound)
 	}
 
 	job := raw.(*JobEntity)
