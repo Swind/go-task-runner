@@ -1,3 +1,6 @@
 # Build binary at root level (not .claude/skills/go-task-runner/)
 /go-task-runner
 .worktrees
+
+go.work
+go.work.sum
