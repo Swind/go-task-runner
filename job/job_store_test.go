@@ -336,6 +336,25 @@ func runJobStoreSuite(t *testing.T, store job.JobStore) {
 		}
 	})
 
+	t.Run("ListJobs_statusOnlyFilter", func(t *testing.T) {
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "so-pending", Type: "statusonly", Status: job.JobStatusPending})
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "so-completed", Type: "statusonly", Status: job.JobStatusCompleted})
+		results, err := store.ListJobs(ctx, job.JobFilter{Status: job.JobStatusCompleted})
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		found := false
+		for _, j := range results {
+			if j.ID == "so-completed" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("so-completed job not found in status-only filter results")
+		}
+	})
+
 	t.Run("GetRecoverableJobs", func(t *testing.T) {
 		_ = store.SaveJob(ctx, &job.JobEntity{ID: "rec-p1", Type: "rec", Status: job.JobStatusPending})
 		_ = store.SaveJob(ctx, &job.JobEntity{ID: "rec-r1", Type: "rec", Status: job.JobStatusRunning})
