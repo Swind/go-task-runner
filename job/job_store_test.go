@@ -265,3 +265,98 @@ func TestMemoryJobStore_Count(t *testing.T) {
 		t.Errorf("Count() = %d after deleting 2, want 8", count)
 	}
 }
+
+// runJobStoreSuite runs the standard JobStore contract tests against any implementation.
+func runJobStoreSuite(t *testing.T, store job.JobStore) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("SaveAndGet", func(t *testing.T) {
+		entity := &job.JobEntity{
+			ID:       "suite-job1",
+			Type:     "email",
+			ArgsData: []byte(`{"to":"user@example.com"}`),
+			Status:   job.JobStatusPending,
+			Priority: 1,
+		}
+		if err := store.SaveJob(ctx, entity); err != nil {
+			t.Fatalf("SaveJob: %v", err)
+		}
+		got, err := store.GetJob(ctx, "suite-job1")
+		if err != nil {
+			t.Fatalf("GetJob: %v", err)
+		}
+		if got.ID != entity.ID {
+			t.Errorf("ID = %s, want %s", got.ID, entity.ID)
+		}
+		if got.Status != job.JobStatusPending {
+			t.Errorf("Status = %s, want PENDING", got.Status)
+		}
+	})
+
+	t.Run("UpdateStatus", func(t *testing.T) {
+		entity := &job.JobEntity{ID: "suite-job2", Type: "sms", Status: job.JobStatusPending}
+		_ = store.SaveJob(ctx, entity)
+		if err := store.UpdateStatus(ctx, "suite-job2", job.JobStatusRunning, "started"); err != nil {
+			t.Fatalf("UpdateStatus: %v", err)
+		}
+		got, _ := store.GetJob(ctx, "suite-job2")
+		if got.Status != job.JobStatusRunning {
+			t.Errorf("Status = %s, want RUNNING", got.Status)
+		}
+		if got.Result != "started" {
+			t.Errorf("Result = %q, want %q", got.Result, "started")
+		}
+	})
+
+	t.Run("ListJobs_all", func(t *testing.T) {
+		for i := 0; i < 3; i++ {
+			_ = store.SaveJob(ctx, &job.JobEntity{
+				ID: fmt.Sprintf("list-job%d", i), Type: "list", Status: job.JobStatusPending,
+			})
+		}
+		jobs, err := store.ListJobs(ctx, job.JobFilter{Type: "list"})
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		if len(jobs) != 3 {
+			t.Errorf("len = %d, want 3", len(jobs))
+		}
+	})
+
+	t.Run("ListJobs_statusFilter", func(t *testing.T) {
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "filter-p", Type: "filter", Status: job.JobStatusPending})
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "filter-c", Type: "filter", Status: job.JobStatusCompleted})
+		pending, err := store.ListJobs(ctx, job.JobFilter{Status: job.JobStatusPending, Type: "filter"})
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		if len(pending) != 1 {
+			t.Errorf("len = %d, want 1", len(pending))
+		}
+	})
+
+	t.Run("GetRecoverableJobs", func(t *testing.T) {
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "rec-p1", Type: "rec", Status: job.JobStatusPending})
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "rec-r1", Type: "rec", Status: job.JobStatusRunning})
+		jobs, err := store.GetRecoverableJobs(ctx)
+		if err != nil {
+			t.Fatalf("GetRecoverableJobs: %v", err)
+		}
+		for _, j := range jobs {
+			if j.Status != job.JobStatusPending {
+				t.Errorf("non-PENDING job in recoverable: %s", j.Status)
+			}
+		}
+	})
+
+	t.Run("DeleteJob", func(t *testing.T) {
+		_ = store.SaveJob(ctx, &job.JobEntity{ID: "del-job1", Type: "del", Status: job.JobStatusPending})
+		if err := store.DeleteJob(ctx, "del-job1"); err != nil {
+			t.Fatalf("DeleteJob: %v", err)
+		}
+		if _, err := store.GetJob(ctx, "del-job1"); err == nil {
+			t.Error("job still exists after DeleteJob")
+		}
+	})
+}
