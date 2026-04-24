@@ -16,7 +16,7 @@ import (
 // JobManager Tests
 // =============================================================================
 
-func setupJobManager(t *testing.T) (*job.JobManager, func()) {
+func setupJobManager(_ *testing.T) (*job.JobManager, func()) {
 	pool := taskrunner.NewGoroutineThreadPool("test-pool", 4)
 	pool.Start(context.Background())
 	controlRunner := taskrunner.NewSequencedTaskRunner(pool)
@@ -333,7 +333,7 @@ func TestJobManager_GetActiveJobs(t *testing.T) {
 	_ = job.RegisterHandler(manager, context.Background(), "email", handler)
 
 	// Act - Submit 3 jobs
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		args := EmailArgs{To: "user@example.com"}
 		_ = manager.SubmitJob(context.Background(), fmt.Sprintf("job%d", i), "email", args, taskrunner.DefaultTaskTraits())
 	}
@@ -1404,7 +1404,6 @@ func TestJobManager_DuplicatePrevention_DatabaseLevel(t *testing.T) {
 	if j.Status != job.JobStatusPending {
 		t.Errorf("Status = %s, want PENDING (original)", j.Status)
 	}
-
 }
 
 // =============================================================================
@@ -1997,10 +1996,7 @@ func TestJobManager_FinalizeStatusPersistedAfterShutdown(t *testing.T) {
 
 	// Wait for the slow UpdateStatus to be called
 	deadline := time.After(2 * time.Second)
-	for {
-		if store.updateCalled.Load() {
-			break
-		}
+	for !store.updateCalled.Load() {
 		select {
 		case <-time.After(5 * time.Millisecond):
 		case <-deadline:
@@ -2185,7 +2181,6 @@ func TestJobManager_SetShutdownRunners_SkipsRunnerShutdown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := manager.Shutdown(ctx)
-
 	// Assert
 	if err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
@@ -2224,7 +2219,6 @@ func TestJobManager_SetShutdownRunners_DefaultShutsDownRunners(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := manager.Shutdown(ctx)
-
 	// Assert
 	if err != nil {
 		t.Fatalf("Shutdown failed: %v", err)

@@ -16,7 +16,11 @@ func TestSQLiteJobStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("db.Close: %v", err)
+		}
+	})
 
 	store, err := job.NewSQLiteJobStore(db)
 	if err != nil {
@@ -31,7 +35,11 @@ func TestSQLiteJobStore_DurableCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("db.Close: %v", err)
+		}
+	})
 
 	store, err := job.NewSQLiteJobStore(db)
 	if err != nil {
