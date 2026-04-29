@@ -30,7 +30,10 @@ What do you need?
 ├─ Thread affinity (blocking IO, CGO)  → SingleThreadTaskRunner
 ├─ Controlled parallelism (max N)      → ParallelTaskRunner
 ├─ UI + Background work                → Task and Reply pattern
-└─ Periodic work                       → PostRepeatingTask
+├─ Periodic work                       → PostRepeatingTask
+├─ Typed event publish/subscribe       → EventBus ⭐
+├─ Durable background jobs             → JobManager + JobStore
+└─ Metrics / panic hooks               → TaskSchedulerConfig
 ```
 
 ## Initialization Patterns
@@ -73,6 +76,28 @@ pool.Start(context.Background())
 defer pool.Stop()
 
 runner := taskrunner.NewSequencedTaskRunner(pool)
+defer runner.Shutdown()
+```
+
+### Pattern 3: Thread Pool with Custom Config (Metrics / Panic Handler)
+
+✅ **Use when**: Need observability, custom panic handling, or rejection hooks
+
+```go
+config := &core.TaskSchedulerConfig{
+    PanicHandler:        &MyPanicHandler{},
+    Metrics:             &MyMetrics{},
+    RejectedTaskHandler: &core.DefaultRejectedTaskHandler{},
+}
+
+pool := taskrunner.NewGoroutineThreadPoolWithConfig("MyPool", 8, config)
+// or priority-based:
+pool := taskrunner.NewPriorityGoroutineThreadPoolWithConfig("MyPool", 8, config)
+pool.Start(context.Background())
+defer pool.Stop()
+
+runner := taskrunner.NewSequencedTaskRunner(pool)
+runner.SetName("my-runner")
 defer runner.Shutdown()
 ```
 
@@ -226,6 +251,41 @@ runner.PostDelayedTask(func(ctx context.Context) {
 }, 1*time.Second)
 ```
 
+### PostTaskNamed - Named Task (for observability)
+
+```go
+runner.PostTaskNamed("validate-token", func(ctx context.Context) {
+    // Task name appears in metrics and logs
+    validateToken(token)
+})
+```
+
+### SetName - Runner Name (for observability)
+
+```go
+runner := taskrunner.NewSequencedTaskRunner(pool)
+runner.SetName("auth-runner")
+```
+
+### WaitIdle - Wait for Queue to Drain
+
+Blocks until all tasks posted before this call have completed.
+
+```go
+runner.PostTask(task1)
+runner.PostTask(task2)
+
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+if err := runner.WaitIdle(ctx); err != nil {
+    log.Printf("WaitIdle: %v", err)
+}
+// task1 and task2 have completed here
+```
+
+Works on `SequencedTaskRunner`, `SingleThreadTaskRunner`, and `ParallelTaskRunner`.
+
 ### PostRepeatingTask - Periodic Execution
 
 ```go
@@ -286,6 +346,115 @@ core.PostTaskAndReplyWithResult(
     uiRunner,
 )
 ```
+
+## EventBus — Typed Publish/Subscribe
+
+**Import**: `github.com/Swind/go-task-runner/eventbus`
+
+**Key properties**: type-safe, lock-free (built on SequencedTaskRunner), sequential handler delivery.
+
+```go
+bus := eventbus.NewEventBus(taskrunner.GlobalThreadPool())
+defer bus.Close()
+
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+// Subscribe — returns ID for unsubscribing
+type UserCreated struct{ ID int; Name string }
+
+subID := eventbus.Subscribe(bus, func(ctx context.Context, event UserCreated) {
+    fmt.Printf("User created: %s\n", event.Name)
+})
+
+// Subscribe to a second type
+type OrderPlaced struct{ UserID int }
+eventbus.Subscribe(bus, func(ctx context.Context, event OrderPlaced) {
+    fmt.Printf("Order placed by user %d\n", event.UserID)
+})
+
+// Publish — non-blocking, enqueues immediately
+bus.Publish(context.Background(), UserCreated{ID: 1, Name: "Alice"})
+
+// Reentrant publish from inside a handler is safe
+eventbus.Subscribe(bus, func(ctx context.Context, event UserCreated) {
+    bus.Publish(ctx, OrderPlaced{UserID: event.ID})  // safe — enqueues without deadlock
+})
+
+// Wait until all handlers finish
+bus.WaitIdle(ctx)
+
+// Unsubscribe by ID
+bus.Unsubscribe(subID)
+```
+
+**Handler state is lock-free** — handlers run sequentially, so no mutexes needed:
+
+```go
+var count int  // No mutex needed
+eventbus.Subscribe(bus, func(ctx context.Context, event UserCreated) {
+    count++  // Sequential execution = no race condition
+})
+```
+
+**📚 Full guide**: [docs/eventbus.md](docs/eventbus.md) | **Template**: [templates/eventbus.go](templates/eventbus.go)
+
+---
+
+## Job Manager — Durable Background Jobs
+
+**Import**: `github.com/Swind/go-task-runner/job`
+
+Persist jobs to memory or SQLite; survive crashes; retry on failure.
+
+```go
+// 1. Choose a store
+store := job.NewMemoryJobStore()
+// or persistent:
+// store, _ := job.NewSQLiteJobStore(db)  // import _ "modernc.org/sqlite"
+
+// 2. Create runners
+controlRunner  := taskrunner.CreateTaskRunner(taskrunner.TaskTraits{Priority: taskrunner.TaskPriorityUserBlocking})
+ioRunner       := taskrunner.CreateTaskRunner(taskrunner.TaskTraits{Priority: taskrunner.TaskPriorityUserVisible})
+executionRunner := taskrunner.CreateTaskRunner(taskrunner.TaskTraits{Priority: taskrunner.TaskPriorityBestEffort})
+
+// 3. Build manager
+manager := job.NewJobManager(controlRunner, ioRunner, executionRunner, store, job.NewJSONSerializer())
+manager.SetShutdownRunners(true)
+manager.SetLogger(job.NewDefaultLogger())
+
+// 4. Register handlers BEFORE Start()
+type SendEmailArgs struct{ To, Subject string }
+job.RegisterHandler(manager, ctx, "send_email",
+    func(ctx context.Context, args SendEmailArgs) error {
+        return sendEmail(args.To, args.Subject)
+    },
+)
+
+// 5. Start (recovers PENDING jobs from store on restart)
+manager.Start(ctx)
+
+// 6. Submit jobs
+manager.SubmitJob(ctx, "email-001", "send_email",
+    SendEmailArgs{To: "alice@example.com", Subject: "Hi"},
+    taskrunner.DefaultTaskTraits(),
+)
+
+// 7. List / monitor
+jobs, _ := store.ListJobs(ctx, job.JobFilter{})
+for _, j := range jobs {
+    fmt.Printf("id=%s status=%s\n", j.ID, j.Status)
+}
+
+// 8. Shutdown
+manager.Shutdown(ctx)
+```
+
+**Job statuses**: `PENDING → RUNNING → COMPLETED | FAILED | CANCELLED`
+
+**📚 Full guide**: [docs/job-manager.md](docs/job-manager.md) | **Template**: [templates/job-manager.go](templates/job-manager.go)
+
+---
 
 ## Lifecycle Management
 
@@ -440,6 +609,17 @@ for _, item := range millionItems {
 - [ ] Tests pass with `go test -race`
 - [ ] No mutexes used with SequencedTaskRunner
 
+### EventBus:
+- [ ] `defer bus.Close()` called
+- [ ] `bus.WaitIdle(ctx)` used when synchronization is needed
+- [ ] No mutexes inside handlers (handlers are sequential)
+
+### Job Manager:
+- [ ] Handlers registered BEFORE `manager.Start(ctx)`
+- [ ] `manager.SetShutdownRunners(true)` if manager owns runners
+- [ ] Job IDs are unique and deterministic (for idempotency)
+- [ ] `manager.Start(ctx)` called to recover PENDING jobs on restart
+
 ## Templates and Code Examples
 
 ### Complete Templates (Ready to Copy):
@@ -449,6 +629,8 @@ for _, item := range millionItems {
 - [`templates/single-thread-runner.go`](templates/single-thread-runner.go) - Thread affinity pattern
 - [`templates/parallel-runner.go`](templates/parallel-runner.go) - Controlled parallelism
 - [`templates/ui-background.go`](templates/ui-background.go) - UI/Background work pattern
+- [`templates/eventbus.go`](templates/eventbus.go) ⭐ - EventBus publish/subscribe
+- [`templates/job-manager.go`](templates/job-manager.go) - Durable background jobs
 
 ### Detailed Documentation:
 - [`docs/lock-free-patterns.md`](docs/lock-free-patterns.md) ⭐ - **How to replace mutexes**
@@ -456,6 +638,9 @@ for _, item := range millionItems {
 - [`docs/task-and-reply.md`](docs/task-and-reply.md) - Task and Reply pattern details
 - [`docs/lifecycle.md`](docs/lifecycle.md) - Shutdown and lifecycle management
 - [`docs/pitfalls.md`](docs/pitfalls.md) - Common mistakes and anti-patterns
+- [`docs/eventbus.md`](docs/eventbus.md) ⭐ - EventBus typed pub/sub
+- [`docs/job-manager.md`](docs/job-manager.md) - Durable job processing with persistence
+- [`docs/observability.md`](docs/observability.md) - Metrics, panic handlers, Prometheus
 
 ## Integration with Other Skills
 
@@ -563,3 +748,9 @@ func ProcessBatch(items []Item) {
 **Lifecycle issues?** → Read [docs/lifecycle.md](docs/lifecycle.md)
 
 **Something wrong?** → Read [docs/pitfalls.md](docs/pitfalls.md)
+
+**Event pub/sub?** → Read [docs/eventbus.md](docs/eventbus.md) ⭐
+
+**Background jobs / persistence?** → Read [docs/job-manager.md](docs/job-manager.md)
+
+**Metrics / observability?** → Read [docs/observability.md](docs/observability.md)
