@@ -35,7 +35,7 @@ func main() {
 }
 
 func drainIdle(bus *eventbus.EventBus, ctx context.Context) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err := bus.WaitIdle(ctx); err != nil {
 			break
 		}
@@ -54,7 +54,7 @@ func basicOrdering() {
 	var counter atomic.Int32
 	const total = 1024
 
-	eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+	eventbus.Subscribe(bus, func(ctx context.Context, event UserCreated) {
 		if counter.Load() != int32(event.ID) {
 			fmt.Printf("  ERROR: expected ID %d, got %d\n", counter.Load(), event.ID)
 		}
@@ -89,12 +89,12 @@ func reentrantPublish() {
 
 	var order []string
 
-	eventbus.Subscribe[UserCreated](bus, func(ctx context.Context, event UserCreated) {
+	eventbus.Subscribe(bus, func(ctx context.Context, event UserCreated) {
 		order = append(order, fmt.Sprintf("user-%d", event.ID))
 		bus.Publish(ctx, OrderPlaced{UserID: event.ID, ProductID: event.ID * 100})
 	})
 
-	eventbus.Subscribe[OrderPlaced](bus, func(ctx context.Context, event OrderPlaced) {
+	eventbus.Subscribe(bus, func(ctx context.Context, event OrderPlaced) {
 		order = append(order, fmt.Sprintf("order-%d", event.ProductID))
 	})
 
